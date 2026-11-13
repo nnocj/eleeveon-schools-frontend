@@ -2,15 +2,17 @@
 /** Authenticated Eleeveon support API. Never copy encrypted support content into school SyncRecord. */
 import { getApiBaseUrl, getAuthToken } from "../sync/syncConfig";
 import type { PublicSupportDevice } from "./supportCrypto";
+import { IS_INDEPENDENT_RUNTIME } from "../independent/runtimeMode";
+import { readOnlineServicesToken } from "../independent/onlineServicesSession";
 
 export type SupportAttachment = { name: string; mimeType: string; sizeBytes: number; kind: "image"|"video"|"audio"|"document"; url: string|null; encrypted?: boolean };
 export type SupportMessage = { id:string; feedbackId:string; authorType:string; authorUserId?:string|null; body:string; attachments?:SupportAttachment[]; internal:boolean; createdAt:string; deletedForEveryone?:boolean };
 export type SupportConversation = {id:string; accountId?:string|null; subject:string; description:string;displayTitle?:string|null;type:string;status:string;priority?:string;organizationName?:string;createdAt:string;updatedAt:string;metadata?:Record<string,unknown>|null;submittedByUserId?:string|null; unreadCount?:number;lastMessage?:{body:string;createdAt:string;authorType:string}|null};
 export type SupportUnread = { total:number; conversations:Array<{id:string;unreadCount:number}> };
 async function request<T>(path:string,init:RequestInit={}):Promise<T>{
- const base=getApiBaseUrl(),token=getAuthToken();
+ const base=getApiBaseUrl(),token=IS_INDEPENDENT_RUNTIME?readOnlineServicesToken():getAuthToken();
  if(!base)throw new Error("The Eleeveon API address is not configured.");
- if(!token)throw new Error("Your session is unavailable. Please sign in again.");
+ if(!token)throw new Error(IS_INDEPENDENT_RUNTIME?"Connect to Eleeveon online services in the Independent header to use Hub or support.":"Your session is unavailable. Please sign in again.");
  const response=await fetch(`${base}${path}`,{...init,headers:{Authorization:`Bearer ${token}`,...(!(init.body instanceof FormData)?{"Content-Type":"application/json"}:{}),...init.headers},cache:"no-store"});
  const raw=await response.text();let parsed:any=null;
  try{parsed=raw?JSON.parse(raw):null;}catch{parsed={message:raw};}

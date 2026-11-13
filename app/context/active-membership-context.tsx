@@ -144,3 +144,64 @@ export function useActiveMembership() {
   if (!context) throw new Error("useActiveMembership must be used inside ActiveMembershipProvider");
   return context;
 }
+
+
+/** Independent membership cannot be upgraded by editing localStorage.
+ * Native APIs still need to check the actual local staff identity for every
+ * protected operation; a React provider is not a security boundary.
+ */
+import type { LocalSession as IndependentMembershipSession } from "../lib/independent/localStaffAuth";
+export function IndependentActiveMembershipProvider({ children, session }: {
+  children: React.ReactNode;
+  session: IndependentMembershipSession;
+}) {
+  const { setActiveSchoolId, setActiveBranchId } = useActiveBranch();
+  const local = session as IndependentMembershipSession & {schoolId?:string;branchId?:string};
+  const membership = React.useMemo<UserMembership>(() => ({
+    id: `independent:${session.id}`,
+    accountId: session.accountId,
+    role: session.role === 'owner' ? 'super_admin' : session.role,
+    schoolId: local.schoolId || null,
+    branchId: local.branchId || null,
+    teacherId: session.role === 'teacher' ? session.id : null,
+    active: true,
+  }), [session]);
+  const [selected, setSelected] = React.useState<UserMembership>(membership);
+  React.useEffect(() => { setSelected(membership); }, [membership]);
+  const setScoped = React.useCallback(async (requested: UserMembership | null) => {
+    if (!requested) throw new Error('Independent membership cannot be cleared while signed in');
+    if (requested.accountId !== session.accountId || requested.role !== membership.role) {
+      throw new Error('Independent role and account cannot be changed by portal navigation');
+    }
+    if (session.role !== 'owner' && (requested.branchId !== local.branchId || requested.schoolId !== local.schoolId)) {
+      throw new Error('This staff member is restricted to the assigned branch');
+    }
+    const permitted: UserMembership = {...membership,
+      schoolId: session.role === 'owner' ? requested.schoolId || null : local.schoolId || null,
+      branchId: session.role === 'owner' ? requested.branchId || null : local.branchId || null,
+    };
+    setSelected(permitted);
+    await setActiveSchoolId(permitted.schoolId || null);
+    await setActiveBranchId(permitted.branchId || null);
+  }, [membership, session, setActiveSchoolId, setActiveBranchId]);
+  React.useEffect(() => {
+    // Clear any Cloud workspace selection on mounting a locally authenticated runtime.
+    clearStoredActiveMembership();
+    if (local.schoolId) void setActiveSchoolId(local.schoolId);
+    if (local.branchId) void setActiveBranchId(local.branchId);
+  }, [session.id, local.schoolId, local.branchId, setActiveSchoolId, setActiveBranchId]);
+  const value: ActiveMembershipContextType = {
+    activeMembership: selected,
+    activeRole: selected.role,
+    activeTeacherId: selected.teacherId || null,
+    activeStudentId: null, activeParentId: null,
+    restored: true,
+    transition: { switching: false, target: null },
+    beginMembershipTransition: () => { throw new Error('Independent role switching requires local reauthentication'); },
+    completeMembershipTransition: () => {},
+    failMembershipTransition: () => {},
+    setActiveMembership: setScoped,
+    clearActiveMembership: () => { throw new Error('Lock the Independent installation to change staff'); },
+  };
+  return <ActiveMembershipContext.Provider value={value}>{children}</ActiveMembershipContext.Provider>;
+}

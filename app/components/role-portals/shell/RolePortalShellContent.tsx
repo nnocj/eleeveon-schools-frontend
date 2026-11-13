@@ -48,6 +48,7 @@ import { useRealtime } from "../../../context/realtime-context";
 import { useTheme } from "../../../context/theme-context";
 import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
+import { IS_INDEPENDENT_RUNTIME } from "../../../lib/independent/runtimeMode";
 import {
   bootstrapPriorityWorkspaceTables,
   arePriorityWorkspaceTablesCached,
@@ -376,7 +377,10 @@ function RolePortalShellContent({
   }, [openedWorkspace]);
 
   const allMemberships = useMemo(() => {
-    const merged = [
+    const merged = IS_INDEPENDENT_RUNTIME ? [
+      // Never import stored Cloud memberships into an offline authenticated role.
+      ...collectUserMemberships(user),
+    ] : [
       ...collectUserMemberships(account),
       ...collectUserMemberships(user),
       ...readStoredMemberships(),
@@ -450,9 +454,9 @@ function RolePortalShellContent({
   ]);
 
   const selectedMembership = useMemo(() => {
-    const normalizedActive =
-      normalizeMembership(activeMembership) ||
-      storedActiveMembership;
+    const normalizedActive = IS_INDEPENDENT_RUNTIME
+      ? normalizeMembership(activeMembership)
+      : (normalizeMembership(activeMembership) || storedActiveMembership);
 
     if (
       normalizedActive &&
@@ -493,11 +497,14 @@ function RolePortalShellContent({
   ]);
 
   const effectiveSchoolId = useMemo(
-    () =>
-      toPermanentId(activeSchoolId) ||
-      toPermanentId(selectedMembership?.schoolId) ||
-      toPermanentId(openedWorkspace?.schoolId) ||
-      readStoredId("activeSchoolId"),
+    () => IS_INDEPENDENT_RUNTIME
+      ? (selectedMembership?.role === 'super_admin'
+        ? (toPermanentId(activeSchoolId) || toPermanentId(selectedMembership?.schoolId))
+        : toPermanentId(selectedMembership?.schoolId))
+      : (toPermanentId(activeSchoolId) ||
+        toPermanentId(selectedMembership?.schoolId) ||
+        toPermanentId(openedWorkspace?.schoolId) ||
+        readStoredId("activeSchoolId")),
     [
       activeSchoolId,
       selectedMembership?.schoolId,
@@ -506,11 +513,14 @@ function RolePortalShellContent({
   );
 
   const effectiveBranchId = useMemo(
-    () =>
-      toPermanentId(activeBranchId) ||
-      toPermanentId(selectedMembership?.branchId) ||
-      toPermanentId(openedWorkspace?.branchId) ||
-      readStoredId("activeBranchId"),
+    () => IS_INDEPENDENT_RUNTIME
+      ? (selectedMembership?.role === 'super_admin'
+        ? (toPermanentId(activeBranchId) || toPermanentId(selectedMembership?.branchId))
+        : toPermanentId(selectedMembership?.branchId))
+      : (toPermanentId(activeBranchId) ||
+        toPermanentId(selectedMembership?.branchId) ||
+        toPermanentId(openedWorkspace?.branchId) ||
+        readStoredId("activeBranchId")),
     [
       activeBranchId,
       selectedMembership?.branchId,
@@ -768,6 +778,8 @@ function RolePortalShellContent({
     ) {
       return;
     }
+
+    if (IS_INDEPENDENT_RUNTIME) return;
 
     if (
       sessionVerified &&
@@ -1058,6 +1070,7 @@ function RolePortalShellContent({
       !accountId ||
       !membershipRestored ||
       !canAccess ||
+      IS_INDEPENDENT_RUNTIME ||
       !appearanceMatchesRole ||
       !databaseContext.ready ||
       !isOnline ||
@@ -1142,7 +1155,7 @@ function RolePortalShellContent({
   // authorized workspace. Background role sync may continue independently.
 
   const retryCurrentModule = useCallback(() => {
-    if (!navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
+    if (IS_INDEPENDENT_RUNTIME || !navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
     // Retry the same module without refreshing the document or other modules.
     priorityAttemptedAt.current.clear();
     setPriorityError(null);
@@ -1552,6 +1565,25 @@ function RolePortalShellContent({
 
     const prepare = async () => {
       try {
+        if (IS_INDEPENDENT_RUNTIME) {
+          // The existing portals use Dexie. Never fetch Cloud bootstrap tables
+          // to prove an Independent workspace is ready. Verify its local scope.
+          if (membership.accountId !== accountId) throw new Error('Independent account mismatch');
+          if (membership.schoolId) {
+            const school = await db.schools.get(membership.schoolId);
+            if (!school || school.accountId !== accountId) throw new Error('The selected Independent school was not found in this local database');
+          }
+          if (membership.branchId) {
+            const branch = await db.branches.get(membership.branchId);
+            if (!branch || branch.accountId !== accountId || branch.schoolId !== membership.schoolId) {
+              throw new Error('The selected Independent branch does not match the signed-in school');
+            }
+          }
+          if (cancelled) return;
+          setEntryState({ key: entryIdentity, state: 'ready' });
+          setEntryProgress(null);
+          return;
+        }
         const ready = appearanceFoundationTables.length === 0 ||
           arePriorityWorkspaceTablesCached(membership, appearanceFoundationTables);
         if (!ready) {

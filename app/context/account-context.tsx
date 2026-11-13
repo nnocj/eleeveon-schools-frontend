@@ -535,3 +535,58 @@ export function useAccount() {
 
   return context;
 }
+
+/** Independent account context. NEVER hydrate this context from Cloud tokens,
+ * cached browser users or /auth/me. Supplied only after native certificate and
+ * local password validation by IndependentRuntimeShell.
+ * This is presentation state, not the native storage authorization boundary.
+ */
+import type { LocalSession as IndependentLocalSession } from "../lib/independent/localStaffAuth";
+import { currentLocalSession as independentCurrentSession } from "../lib/independent/localStaffAuth";
+export function IndependentAccountProvider({ children, session, onLock }: {
+  children: React.ReactNode;
+  session: IndependentLocalSession;
+  onLock: () => void;
+}) {
+  const [valid, setValid] = React.useState(true);
+  React.useEffect(() => {
+    const verify = () => {
+      const live = independentCurrentSession();
+      if (!live || live.id !== session.id || live.accountId !== session.accountId || live.expiresAt <= Date.now()) {
+        setValid(false);
+        onLock();
+      }
+    };
+    verify();
+    const timer = window.setInterval(verify, 10_000);
+    return () => window.clearInterval(timer);
+  }, [session, onLock]);
+  const local = session as IndependentLocalSession & {schoolId?:string;branchId?:string};
+  const membership: UserMembership = {
+    id: `independent:${session.id}`,
+    accountId: session.accountId,
+    role: session.role === "owner" ? "super_admin" : session.role,
+    schoolId: local.schoolId || null,
+    branchId: local.branchId || null,
+    teacherId: session.role === "teacher" ? session.id : null,
+    active: true,
+  };
+  const user: AccountUser = {
+    id: session.id,
+    accountId: session.accountId,
+    fullName: session.displayName,
+    email: "",
+    role: membership.role,
+    memberships: [membership],
+  };
+  const account: AccountInfo = { id: session.accountId, name: "Independent School", status: "active" };
+  const value: AccountContextType = {
+    user, account, subscription: null, accountId: session.accountId,
+    loading: false, restoring: false, verifying: false, sessionVerified: true,
+    offline: true, authenticated: valid,
+    refreshAccount: async () => {},
+    logout: async () => { setValid(false); onLock(); },
+  };
+  if (!valid) return null;
+  return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;
+}

@@ -4,7 +4,7 @@ import IndependentLocalSignIn from './IndependentLocalSignIn';
 import IndependentFirstOwnerSetup from './IndependentFirstOwnerSetup';
 import IndependentBackupPanel from './IndependentBackupPanel';
 import IndependentRestorePanel from './IndependentRestorePanel';
-import IndependentSchoolWorkspace from './IndependentSchoolWorkspace';
+import IndependentOriginalPortalHost from './IndependentOriginalPortalHost';
 import { APP_DB_NAME } from '../../lib/db/db-version';
 import { checkIndependentSchoolDatabase, type DatabaseReadiness } from '../../lib/independent/databaseReadiness';
 import {getIndependentNativeBridge} from '../../lib/independent/nativeBridge';
@@ -41,15 +41,5 @@ export default function IndependentRuntimeShell({children: _children}:{children:
  if(state.status==='blocked'||!state.license)return <main className="min-h-dvh grid place-items-center bg-zinc-100 p-6 dark:bg-zinc-950"><section role="alert" className="max-w-lg rounded-2xl border bg-white p-6 dark:bg-zinc-900"><h1 className="text-xl font-semibold">Independent installation not ready</h1><p className="mt-3 text-sm">{state.message}</p><p className="mt-3 text-xs text-zinc-500">No school records were changed. This build will not fall back to Cloud authentication.</p></section></main>;
  if(!ownerProvisioned)return <IndependentFirstOwnerSetup accountId={state.license.accountId} installationVerified={true} onComplete={()=>setOwnerProvisioned(true)}/>;
  if(!session || !currentLocalSession())return <IndependentLocalSignIn accountId={state.license.accountId} onAuthenticated={s=>{setSession(s);setState(v=>({...v,status:'signedin'}));}}/>;
- return <main className="min-h-dvh bg-zinc-50 p-4 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50"><div className="mx-auto max-w-3xl space-y-4">
-  <header className="flex items-center justify-between gap-3"><div><h1 className="text-xl font-semibold">Eleeveon Schools · Independent</h1><p className="text-sm text-zinc-500">Verified offline license · {session.displayName} · {session.role}</p></div><button className="rounded-lg border px-4 py-2" onClick={()=>{lockLocalSession();setSession(null);setDbReadiness(null);}}>Lock</button></header>
-  <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">Independent security workspace. School record workspace uses the real EleeveonDB. Advanced Cloud-dependent portal modules remain disabled until their local authorization and data paths are implemented.</div>
-  <IndependentSchoolWorkspace license={state.license} session={session} />
-  {session.role === 'owner' && <section className="rounded-xl border p-4 space-y-3"><h2 className="font-semibold">Real school database status</h2><button className="rounded-lg border px-3 py-2 text-sm" disabled={checkingDb} onClick={()=>{setCheckingDb(true);void checkIndependentSchoolDatabase().then(setDbReadiness).finally(()=>setCheckingDb(false));}}>{checkingDb?'Checking…':'Check EleeveonDB'}</button>
-    {dbReadiness && <p className="text-sm" role="status">{dbReadiness.available?`Existing database detected: ${dbReadiness.name} (version ${dbReadiness.version}, ${dbReadiness.storeCount} stores)`:`Backup unavailable: ${dbReadiness.reason}`}</p>}
-    {dbReadiness?.available && <><IndependentBackupPanel databaseName={APP_DB_NAME} accountId={state.license.accountId} /><IndependentRestorePanel databaseName={APP_DB_NAME} accountId={state.license.accountId} /></>}
-  </section>}
-  {session.role !== 'owner' && <p className="text-sm text-zinc-500">Only the verified local Owner can access this backup workspace.</p>}
-  <p className="text-xs text-zinc-500">A successful backup includes IndexedDB data, not files held outside IndexedDB. Verify the backup separately, retain the passphrase, and do not treat Google Drive file mirroring as live device sync.</p>
- </div></main>;
+ return <IndependentOriginalPortalHost session={session} license={state.license} onLock={()=>{lockLocalSession();setSession(null);setDbReadiness(null);}}/>;
 }

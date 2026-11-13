@@ -1162,10 +1162,10 @@ export default function Home() {
           </div>
 
           <div className="mt-10 rounded-3xl border border-white/15 bg-white/7 p-5 text-sm leading-6 text-white/70 dark:border-zinc-200 dark:bg-zinc-50 dark:text-zinc-600">
-            Current online checkout shows published subscription packages.
-            Desktop perpetual licences can be introduced once their one-time
-            prices, device rules, version entitlement and upgrade policy are
-            configured in the billing system.
+            Select an Independent licence from the pricing cards to review its
+            one-time package and sign in or register. Cloud subscriptions retain
+            the existing payment flow. Independent licence payments remain
+            unavailable until verified perpetual checkout and installer delivery are ready.
           </div>
         </div>
       </section>
@@ -1481,21 +1481,26 @@ export default function Home() {
                         <div className="mt-auto pt-7">
                           <button
                             type="button"
-                            onClick={() =>
-                              availableOnline ? openPublicSignup(plan) : undefined
-                            }
-                            disabled={!availableOnline}
+                            onClick={() => {
+                              if (specialPurchase) {
+                                // Website selection only: permanent-license payment is not yet supported here.
+                                window.location.assign(`/independent/start?planId=${encodeURIComponent(plan.id)}`);
+                              } else if (availableOnline) {
+                                openPublicSignup(plan);
+                              }
+                            }}
+                            disabled={!availableOnline && !specialPurchase}
                             className={`inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition hover:-translate-y-0.5 ${
                               recommended
                                 ? "bg-[#2f6fed] text-white hover:bg-[#245ed0] disabled:opacity-50"
                                 : "bg-zinc-950 text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
                             }`}
                           >
-                            {availableOnline ? (trial ? "Start free trial" : `Choose ${plan.name}`) : (studentPriced ? "Contact Eleeveon for capacity" : "Installation enquiry — coming soon")}
+                            {specialPurchase ? `Explore ${plan.name}` : availableOnline ? (trial ? "Start free trial" : `Choose ${plan.name}`) : (studentPriced ? "Contact Eleeveon for capacity" : "Installation enquiry — coming soon")}
                             <ArrowIcon />
                           </button>
                           <p className="mt-3 text-center text-xs text-zinc-400">
-                            {availableOnline ? "Create an owner account to continue." : "This package is visible for comparison; online purchase is not yet enabled."}
+                            {specialPurchase ? "Review the one-time licence and sign in. Payment is not enabled yet." : availableOnline ? "Create an owner account to continue." : "This package is visible for comparison; online purchase is not yet enabled."}
                           </p>
                         </div>
                       </article>

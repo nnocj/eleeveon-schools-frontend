@@ -225,9 +225,11 @@ export default function RegisterPage() {
         ownerMembership,
       );
 
-      window.location.replace(
-        "/owner",
-      );
+      // Keep Independent selection when registering a new Owner account.
+      // This is navigation only; registering does not issue a paid licence.
+      const independentPlanId = new URLSearchParams(window.location.search).get("independentPlanId");
+      window.location.replace(independentPlanId && /^[a-zA-Z0-9_-]{1,80}$/.test(independentPlanId)
+        ? `/independent/start?planId=${encodeURIComponent(independentPlanId)}` : "/owner");
           } catch (error: any) {
             alert(error?.message || "Registration failed");
           } finally {

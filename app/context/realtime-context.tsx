@@ -255,3 +255,13 @@ export function useRealtime() {
 
   return context;
 }
+
+/** No Socket.IO / Cloud connection for an Independent installation. */
+export function IndependentRealtimeProvider({children}:{children:ReactNode}) {
+  const value: RealtimeContextValue = {
+    status: {status: 'offline', connected:false, reconnectAttempt:0},
+    connected:false, lastEvent:null,
+    reconnect:()=>{}, disconnect:()=>{},
+  };
+  return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
+}

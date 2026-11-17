@@ -1,0 +1,13 @@
+[
+  "app/lib/independent",
+  "app/components/independent",
+  "app/lib/sync",
+  "app/lib/db",
+  "app/independent",
+  "app/lib/platformApi.ts",
+  "app/lib/api/apiClient.ts",
+  "app/providers.tsx",
+  "scripts/build-independent-native-preview.cjs",
+  "scripts/verify-independent-native-preview.cjs",
+  "scripts/audit-independent-runtime.cjs"
+]

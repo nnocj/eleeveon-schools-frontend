@@ -1,0 +1,5 @@
+
+# Independent Electron staging and packaging
+/electron/independent-web/
+/electron/dist/
+/electron/release/

@@ -385,6 +385,15 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // Skip known-offline requests when a cached identity already exists.
+      // Do not invent an identity for a first-time login.
+      if (typeof navigator !== "undefined" && !navigator.onLine &&
+          readStoredUserWithFallback(storedAccountId)) {
+        setOffline(true);
+        setSessionVerified(false);
+        return;
+      }
+
       const res = await apiClient<{
         user: AccountUser;
         account?: AccountInfo | null;
@@ -468,6 +477,16 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       setAccount(normalizeAccountInfo(storedAccount || null, restoredUser?.accountId || storedAccountId));
       setFallbackAccountId(restoredUser?.accountId || storedAccountId || null);
       setRestoring(false);
+    }
+
+    // Offline startup: a previously authenticated user can open the locally
+    // available workspace without waiting for /auth/me. This is a UI/session
+    // restoration path, not a new authorization grant or a token refresh.
+    // When connectivity returns, normal verification must still take place.
+    if (hasCachedSession && typeof navigator !== "undefined" && !navigator.onLine) {
+      setOffline(true);
+      setSessionVerified(false);
+      return;
     }
 
     void refreshAccount({

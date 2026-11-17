@@ -1553,7 +1553,7 @@ function RolePortalShellContent({
 
   useEffect(() => {
     if (!entryIdentity || !selectedMembership || !authenticated ||
-        !sessionVerified || !membershipRestored || !canAccess ||
+        !(sessionVerified || (accountOffline && authenticated)) || !membershipRestored || !canAccess ||
         accountRestoring || accountLoading ||
         !databaseContext.ready || switchingMembershipId) return;
 
@@ -1587,7 +1587,7 @@ function RolePortalShellContent({
         const ready = appearanceFoundationTables.length === 0 ||
           arePriorityWorkspaceTablesCached(membership, appearanceFoundationTables);
         if (!ready) {
-          if (!navigator.onLine) throw new Error("Connect to the internet to initialize this workspace for the first time.");
+          if (accountOffline || !navigator.onLine) throw new Error("This workspace has not completed its first online school-identity download. Reconnect once to prepare it for offline use.");
           setEntryProgress({ stage: "requesting", title: "Downloading school appearance…",
             detail: "Getting the selected school, branch and settings before entry.", percent: 20 });
           await startupDeadline(

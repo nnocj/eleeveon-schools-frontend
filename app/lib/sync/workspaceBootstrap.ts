@@ -884,7 +884,8 @@ export function bootstrapSelectedWorkspace(
 
 function isSnapshotChanged(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("WORKSPACE_SNAPSHOT_CHANGED");
+  return message.includes("WORKSPACE_SNAPSHOT_CHANGED") ||
+    /Invalid workspace page cursor|WORKSPACE_INVALID_CURSOR|INVALID_WORKSPACE_CURSOR/i.test(message);
 }
 
 async function bootstrapWorkspacePages(

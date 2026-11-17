@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import Providers from "./providers";
+import ServiceWorkerRegistration from "./components/offline/ServiceWorkerRegistration";
 import GlobalBrandingRuntime from "./components/GlobalBrandingRuntime";
 import SupportUnreadRuntime from "./components/role-portals/SupportUnreadRuntime";
 export const metadata: Metadata = {
@@ -17,5 +18,5 @@ export const metadata: Metadata = {
 };
 export const viewport:Viewport={width:"device-width",initialScale:1,viewportFit:"cover",themeColor:[{media:"(prefers-color-scheme: light)",color:"#f8fafc"},{media:"(prefers-color-scheme: dark)",color:"#0f172a"}],colorScheme:"light dark"};
 export default function RootLayout({children}:{children:ReactNode}){
- return <html lang="en" suppressHydrationWarning><body style={{margin:0,minHeight:"100dvh",background:"var(--bg, #f7f8fb)",color:"var(--text, #111111)",fontFamily:"var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)",fontSize:"var(--font-size, 16px)",transition:"background .3s ease, color .3s ease"}}><Providers><GlobalBrandingRuntime/><SupportUnreadRuntime/>{children}</Providers></body></html>;
+ return <html lang="en" suppressHydrationWarning><body style={{margin:0,minHeight:"100dvh",background:"var(--bg, #f7f8fb)",color:"var(--text, #111111)",fontFamily:"var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)",fontSize:"var(--font-size, 16px)",transition:"background .3s ease, color .3s ease"}}><ServiceWorkerRegistration/><Providers><GlobalBrandingRuntime/><SupportUnreadRuntime/>{children}</Providers></body></html>;
 }

@@ -10,7 +10,10 @@ export type LocalSession = { readonly id: string; readonly accountId: string; re
 const DB_NAME = 'eleeveon-independent-auth-v1';
 const STORE = 'staff';
 const ITERATIONS = 310_000;
-const SESSION_MS = 12 * 60 * 60 * 1000;
+// No arbitrary inactivity timeout: session remains valid until explicit lock/logout.
+// This session is deliberately memory-only; after browser process restart, staff
+// must prove identity again with their local password. Never persist a password.
+const SESSION_MS = Number.POSITIVE_INFINITY;
 const text = new TextEncoder();
 let session: LocalSession | null = null;
 function bytes(data: number[]): Uint8Array<ArrayBuffer> { return new Uint8Array(data); }
@@ -97,11 +100,11 @@ export async function signInLocal(args:{accountId:string;id:string;password:stri
     throw new Error('Incorrect credentials or inactive local account');
   }
   user.failed=0;user.lockedUntil=0;await write(user);
-  session={id:user.id,accountId:user.accountId,displayName:user.displayName,role:user.role,authenticatedAt:Date.now(),expiresAt:Date.now()+SESSION_MS};
+  session={id:user.id,accountId:user.accountId,displayName:user.displayName,role:user.role,authenticatedAt:Date.now(),expiresAt:Number.MAX_SAFE_INTEGER};
   return session;
 }
 export function currentLocalSession():LocalSession|null {
-  if(!session || session.expiresAt<=Date.now()){session=null;return null;}
+  if(!session){return null;}
   return session;
 }
 export function requireLocalSession(accountId:string, roles:LocalRole[]=[]):LocalSession {

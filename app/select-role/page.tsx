@@ -1,3 +1,4 @@
+import { permittedOfflineMemberships } from "../lib/auth/offlineMembershipPolicy";
 
 "use client";
 
@@ -412,11 +413,14 @@ export default function SelectRolePage() {
     useState<string | null>(null);
 
   const memberships = useMemo(() => {
-    const merged = [
+    // Never union arbitrary persisted roles with an available account identity.
+    // Cached roles are a navigation fallback only when the account payload is thin.
+    const accountRoles = [
       ...collectUserMemberships(account),
       ...collectUserMemberships(user),
-      ...collectStoredMemberships(),
     ];
+    const merged = accountRoles.length ? accountRoles :
+      (authenticated && user ? collectStoredMemberships() : []);
 
     const unique = uniqueMemberships(merged);
 
@@ -428,7 +432,7 @@ export default function SelectRolePage() {
     }
 
     return unique;
-  }, [account, user]);
+  }, [account, user, authenticated]);
 
   const workspaceNames =
     useWorkspaceDisplayNames(memberships);
@@ -510,6 +514,7 @@ export default function SelectRolePage() {
     // usable memberships. Cached data is an offline convenience, not a grant.
     const authorized = memberships.find((candidate) =>
       membershipKey(candidate) === id &&
+      permittedOfflineMemberships(memberships, normalized) &&
       candidate.role === normalized.role &&
       String(candidate.schoolId || "") === String(normalized.schoolId || "") &&
       String(candidate.branchId || "") === String(normalized.branchId || "") &&

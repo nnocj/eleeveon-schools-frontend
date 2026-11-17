@@ -125,6 +125,19 @@ type AccountContextType = {
 const AccountContext = createContext<AccountContextType | undefined>(undefined);
 
 const STORED_USER_MEMBERSHIPS_KEY = "eleeveon_user_memberships";
+// This is a UX fallback, not cryptographic proof of offline authorization.
+// Bind cached identity to the previously verified account/user without a time-based offline cutoff.
+const OFFLINE_SESSION_META_KEY = "eleeveon_offline_session_meta_v1";
+type OfflineSessionMeta = { userId: string; accountId: string; verifiedAt: number };
+function writeOfflineSessionMeta(user: AccountUser, accountId: string) {
+  writeJson(OFFLINE_SESSION_META_KEY, { userId: user.id, accountId, verifiedAt: Date.now() });
+}
+function cachedSessionEligible(user: AccountUser | null, accountId: string | null): boolean {
+  if (!user?.id || !accountId || !getAuthToken()) return false;
+  const meta = readJson<OfflineSessionMeta>(OFFLINE_SESSION_META_KEY);
+  return Boolean(meta && meta.userId === user.id && meta.accountId === accountId &&
+    Number.isFinite(meta.verifiedAt));
+}
 const STORED_ACCOUNT_USER_KEY = "eleeveon_account_user";
 const STORED_ACCOUNT_INFO_KEY = "eleeveon_account_info";
 
@@ -194,6 +207,7 @@ function writeJson(key: string, value: unknown) {
 }
 
 function clearStoredAccountSessionCache() {
+  safeRemoveStorage(OFFLINE_SESSION_META_KEY);
   safeRemoveStorage(STORED_USER_MEMBERSHIPS_KEY);
   safeRemoveStorage(STORED_ACCOUNT_USER_KEY);
   safeRemoveStorage(STORED_ACCOUNT_INFO_KEY);
@@ -284,7 +298,10 @@ function mergeUserWithMembershipFallback(args: {
     ...collectUserMemberships(args.incomingAccount),
   ]);
 
-  const fallbackMemberships = readStoredMemberships();
+  const storedUser = readJson<AccountUser>(STORED_ACCOUNT_USER_KEY);
+  const sameIdentity = storedUser?.id === args.incomingUser.id &&
+    storedUser?.accountId === args.incomingUser.accountId;
+  const fallbackMemberships = sameIdentity ? readStoredMemberships() : [];
 
   const memberships = incomingMemberships.length
     ? incomingMemberships
@@ -318,7 +335,9 @@ function readStoredUserWithFallback(storedAccountId?: string | null) {
     readJson<AccountUser>(AUTH_USER_KEY) ||
     readJson<AccountUser>("user");
 
-  const memberships = readStoredMemberships();
+  const memberships = storedUser?.id &&
+    cachedSessionEligible(storedUser, storedUser.accountId || storedAccountId || null)
+    ? readStoredMemberships() : [];
 
   if (!storedUser && !memberships.length) return null;
 
@@ -349,9 +368,9 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     readStoredAccountInfo(),
     initialUser?.accountId || initialAccountId,
   );
-  const hasInitialCachedSession = Boolean(initialUser && getAuthToken());
+  const hasInitialCachedSession = cachedSessionEligible(initialUser, initialUser?.accountId || initialAccountId);
 
-  const [user, setUser] = useState<AccountUser | null>(initialUser);
+  const [user, setUser] = useState<AccountUser | null>(hasInitialCachedSession ? initialUser : null);
   const [account, setAccount] = useState<AccountInfo | null>(initialAccount);
   const [fallbackAccountId, setFallbackAccountId] = useState<string | null>(
     initialUser?.accountId || initialAccountId || null,
@@ -385,12 +404,20 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Skip known-offline requests when a cached identity already exists.
-      // Do not invent an identity for a first-time login.
-      if (typeof navigator !== "undefined" && !navigator.onLine &&
-          readStoredUserWithFallback(storedAccountId)) {
-        setOffline(true);
-        setSessionVerified(false);
+      // Avoid unnecessary network calls on a known-offline device.
+      // An expired cached session must not be silently renewed offline.
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        const cached = readStoredUserWithFallback(storedAccountId);
+        if (cachedSessionEligible(cached, cached?.accountId || storedAccountId)) {
+          setUser(cached);
+          setAccount(normalizeAccountInfo(readStoredAccountInfo(), cached?.accountId || storedAccountId));
+          setSessionVerified(false);
+          setOffline(true);
+        } else {
+          setUser(null);
+          setSessionVerified(false);
+          setOffline(true);
+        }
         return;
       }
 
@@ -423,6 +450,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       }
 
       saveMembershipBackup(nextUser, normalizedAccount);
+      if (resolvedAccountId && nextUser.id) writeOfflineSessionMeta(nextUser, resolvedAccountId);
       setSessionVerified(true);
       setOffline(false);
     } catch (error: any) {
@@ -450,7 +478,14 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (networkFailure) {
-        // Keep the cached user/account/memberships and current workspace alive.
+        // Preserve only a recent, identity-bound cached session during outages.
+        const cached = readStoredUserWithFallback(getAccountId());
+        if (cachedSessionEligible(cached, cached?.accountId || getAccountId())) {
+          setUser(cached);
+          setAccount(normalizeAccountInfo(readStoredAccountInfo(), cached?.accountId || getAccountId()));
+        } else {
+          setUser(null);
+        }
         setOffline(true);
         console.warn(
           `[account] ${options.reason || "background"} verification unavailable; using cached session.`,
@@ -470,23 +505,13 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     const storedAccountId = getAccountId();
     const storedAccount = readStoredAccountInfo();
     const restoredUser = readStoredUserWithFallback(storedAccountId);
-    const hasCachedSession = Boolean(restoredUser && getAuthToken());
+    const hasCachedSession = cachedSessionEligible(restoredUser, restoredUser?.accountId || storedAccountId);
 
     if (hasCachedSession) {
       setUser(restoredUser);
       setAccount(normalizeAccountInfo(storedAccount || null, restoredUser?.accountId || storedAccountId));
       setFallbackAccountId(restoredUser?.accountId || storedAccountId || null);
       setRestoring(false);
-    }
-
-    // Offline startup: a previously authenticated user can open the locally
-    // available workspace without waiting for /auth/me. This is a UI/session
-    // restoration path, not a new authorization grant or a token refresh.
-    // When connectivity returns, normal verification must still take place.
-    if (hasCachedSession && typeof navigator !== "undefined" && !navigator.onLine) {
-      setOffline(true);
-      setSessionVerified(false);
-      return;
     }
 
     void refreshAccount({
@@ -522,7 +547,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       verifying,
       sessionVerified,
       offline,
-      authenticated: !!user && !!getAuthToken(),
+      authenticated: !!user && cachedSessionEligible(user, user.accountId || fallbackAccountId),
       refreshAccount,
       logout,
     }),

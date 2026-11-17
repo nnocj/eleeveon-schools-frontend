@@ -13,17 +13,18 @@ import {
 import { clearAccountId } from "../sync/syncConfig";
 import { stopSynchronizationForLogout } from "../sync/syncEngine";
 import { disconnectRealtime } from "../realtime/realtimeClient";
+import { lockLocalSession } from "../independent/localStaffAuth";
 
 export const LOGOUT_EVENT_NAME = "eleeveon:atomic-logout";
 let activeLogoutPromise: Promise<void> | null = null;
 
 const AUTH_SESSION_KEYS = [
-  "eleeveon_auth_token", "eleeveon_access_token", "accessToken", "token", "authToken",
+  "eleeveon_offline_session_meta_v1", "eleeveon_auth_token", "eleeveon_access_token", "accessToken", "token", "authToken",
   "eleeveon_auth_user", "eleeveon_auth_account", "eleeveon_account_user",
   "eleeveon_account_info", "eleeveon_user_memberships", "eleeveon_open_workspace",
   "activeMembership", "activeMembershipId", "activeRole", "activeSchoolId",
   "activeBranchId", "activeTeacherId", "activeStudentId", "activeParentId",
-  "eleeveon_branding_refresh_key", "user", "account",
+  "eleeveon_branding_refresh_key", "user", "account", "portalUser",
 ];
 
 function clearStorageKeys() {
@@ -57,6 +58,8 @@ export function performAtomicLogout(options: AtomicLogoutOptions = {}) {
     if (!isLogoutInProgress()) markLogoutInProgress(true);
     incrementSessionGeneration();
     stopSynchronizationForLogout();
+    // Prevent a previous Independent staff identity surviving an account change.
+    lockLocalSession();
     disconnectRealtime();
     abortSessionRequests("Logout");
     notifyReactContexts();

@@ -52,6 +52,7 @@ import { IS_INDEPENDENT_RUNTIME } from "../../../lib/independent/runtimeMode";
 import {
   bootstrapPriorityWorkspaceTables,
   arePriorityWorkspaceTablesCached,
+  isWorkspaceIdentityLocallyAvailable,
   type WorkspaceBootstrapProgress,
 } from "../../../lib/sync/workspaceBootstrap";
 import WorkspaceBootstrapScreen from "../../WorkspaceBootstrapScreen";
@@ -1584,6 +1585,25 @@ function RolePortalShellContent({
           setEntryProgress(null);
           return;
         }
+        // Offline reopening is not a full-download certification. A previously
+        // initialized workspace may have a valid local identity even when a
+        // complete table registry marker was never written.
+        if (accountOffline || !navigator.onLine) {
+          const authorized = allMemberships.some(candidate =>
+            sameMembership(normalizeMembership(candidate), membership) &&
+            (!candidate.accountId || String(candidate.accountId) === String(accountId))
+          );
+          if (!authorized || (membership.accountId && String(membership.accountId) !== String(accountId))) {
+            throw new Error("The selected offline membership does not belong to this account.");
+          }
+          if (!(await startupDeadline(isWorkspaceIdentityLocallyAvailable(membership), "Local workspace identity check", 10_000))) {
+            throw new Error("This school and branch identity is not yet stored on this device. Connect once to prepare this workspace for offline use.");
+          }
+          if (cancelled) return;
+          setEntryState({ key: entryIdentity, state: "ready" });
+          setEntryProgress(null);
+          return;
+        }
         const ready = appearanceFoundationTables.length === 0 ||
           arePriorityWorkspaceTablesCached(membership, appearanceFoundationTables);
         if (!ready) {
@@ -1638,7 +1658,7 @@ function RolePortalShellContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryIdentity, entryRetry, authenticated, sessionVerified,
       membershipRestored, canAccess, accountRestoring, accountLoading,
-      databaseContext.ready, switchingMembershipId, startupDeadline]);
+      databaseContext.ready, switchingMembershipId, startupDeadline, accountOffline, allMemberships]);
 
   const firstDownloadReady = Boolean(entryIdentity &&
     entryState.key === entryIdentity && entryState.state === "ready");

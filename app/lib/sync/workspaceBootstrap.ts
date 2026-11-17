@@ -748,6 +748,21 @@ function isFullTableRegistryRequired(role: string): boolean {
   ].includes(role);
 }
 
+/**
+ * Entry readiness is deliberately separate from complete-download readiness.
+ * A local school/branch identity can permit offline entry while individual
+ * modules still report partial or missing synchronized tables.
+ * This does not grant a membership; callers must validate the authenticated
+ * account and selected membership independently.
+ */
+export async function isWorkspaceIdentityLocallyAvailable(
+  membership: WorkspaceBootstrapMembership,
+): Promise<boolean> {
+  const accountId = assertAccountId();
+  if (membership.accountId && clean(membership.accountId) !== accountId) return false;
+  return actualWorkspaceReady(accountId, membership);
+}
+
 export async function isWorkspaceLocallyReady(
   membership: WorkspaceBootstrapMembership,
 ) {

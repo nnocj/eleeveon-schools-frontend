@@ -1,12 +1,12 @@
 /** Local staff credential foundation for Independent installations.
  * Important: browser IndexedDB provides no tamper-resistant authorization boundary.
- * Native encrypted storage and trusted local API enforcement remain required before release.
+ * Browser IndexedDB is not a tamper-resistant authorization boundary; assess data encryption and role isolation before release.
  * No Eleeveon server requests are made by this module.
  */
 export type LocalRole = 'owner' | 'branch_admin' | 'teacher';
-export type LocalStaffPublic = { id: string; accountId: string; displayName: string; role: LocalRole; active: boolean };
+export type LocalStaffPublic = { id: string; accountId: string; displayName: string; role: LocalRole; active: boolean; schoolId?: string; branchId?: string };
 type StaffRecord = LocalStaffPublic & { salt: number[]; verifier: number[]; iterations: number; failed: number; lockedUntil: number; createdAt: number };
-export type LocalSession = { readonly id: string; readonly accountId: string; readonly displayName: string; readonly role: LocalRole; readonly authenticatedAt: number; readonly expiresAt: number };
+export type LocalSession = { readonly id: string; readonly accountId: string; readonly displayName: string; readonly role: LocalRole; readonly authenticatedAt: number; readonly expiresAt: number; readonly schoolId?: string; readonly branchId?: string };
 const DB_NAME = 'eleeveon-independent-auth-v1';
 const STORE = 'staff';
 const ITERATIONS = 310_000;
@@ -49,7 +49,7 @@ async function write(record:StaffRecord):Promise<void> {
   finally {db.close();}
 }
 function validPassword(password:string):boolean {return password.length>=12 && password.length<=256;}
-function publicStaff(user:StaffRecord):LocalStaffPublic {const {id,accountId,displayName,role,active}=user;return {id,accountId,displayName,role,active};}
+function publicStaff(user:StaffRecord):LocalStaffPublic {const {id,accountId,displayName,role,active,schoolId,branchId}=user;return {id,accountId,displayName,role,active,schoolId,branchId};}
 export async function isLocalOwnerProvisioned(accountId:string):Promise<boolean> {
   return (await readAll()).some(u=>u.accountId===accountId && u.role==='owner' && u.active);
 }
@@ -100,7 +100,7 @@ export async function signInLocal(args:{accountId:string;id:string;password:stri
     throw new Error('Incorrect credentials or inactive local account');
   }
   user.failed=0;user.lockedUntil=0;await write(user);
-  session={id:user.id,accountId:user.accountId,displayName:user.displayName,role:user.role,authenticatedAt:Date.now(),expiresAt:Number.MAX_SAFE_INTEGER};
+  session={id:user.id,accountId:user.accountId,displayName:user.displayName,role:user.role,authenticatedAt:Date.now(),expiresAt:Number.MAX_SAFE_INTEGER,schoolId:user.schoolId,branchId:user.branchId};
   return session;
 }
 export function currentLocalSession():LocalSession|null {
@@ -113,3 +113,21 @@ export function requireLocalSession(accountId:string, roles:LocalRole[]=[]):Loca
   return current;
 }
 export function lockLocalSession():void {session=null;}
+
+/** Owner-managed local staff. This store is per browser installation, not a remote identity service.
+ * Never expose these methods to unverified Cloud sessions or public onboarding.
+ */
+export async function createLocalStaff(args:{accountId:string;displayName:string;password:string;role:'branch_admin'|'teacher';schoolId:string;branchId:string}):Promise<LocalStaffPublic>{
+ requireLocalSession(args.accountId,['owner']);
+ if(!args.schoolId||!args.branchId)throw new Error('Select a school and branch');
+ if(!args.displayName.trim())throw new Error('Staff name is required');
+ if(!validPassword(args.password))throw new Error('Password must be at least 12 characters');
+ const salt=crypto.getRandomValues(new Uint8Array(24));
+ const record:StaffRecord={id:crypto.randomUUID(),accountId:args.accountId,displayName:args.displayName.trim(),role:args.role,schoolId:args.schoolId,branchId:args.branchId,active:true,salt:[...salt],verifier:[...await derive(args.password,salt)],iterations:ITERATIONS,failed:0,lockedUntil:0,createdAt:Date.now()};
+ const d=await openDb();try{await new Promise<void>((resolve,reject)=>{const t=d.transaction(STORE,'readwrite');t.objectStore(STORE).add(record);t.oncomplete=()=>resolve();t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error);});}finally{d.close();}
+ return publicStaff(record);
+}
+export async function setLocalStaffActive(accountId:string,id:string,active:boolean):Promise<void>{
+ requireLocalSession(accountId,['owner']);
+ const d=await openDb();try{await new Promise<void>((resolve,reject)=>{const t=d.transaction(STORE,'readwrite');const store=t.objectStore(STORE);const request=store.get(id);request.onsuccess=()=>{const record=request.result as StaffRecord|undefined;if(!record||record.accountId!==accountId||record.role==='owner'){t.abort();return;}store.put({...record,active});};request.onerror=()=>t.abort();t.oncomplete=()=>resolve();t.onerror=()=>reject(t.error??new Error('Unable to change staff status'));t.onabort=()=>reject(new Error('Staff not found or owner account protected'));});}finally{d.close();}
+}

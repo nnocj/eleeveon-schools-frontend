@@ -3,6 +3,9 @@
 import type {
   ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { APP_DB_NAME } from "./lib/db/db-version";
 
 import AppUpdateManager from "./components/AppUpdateManager";
 import DatabaseBootstrap from "./components/DatabaseBootstrap";
@@ -153,10 +156,15 @@ function CloudProviders({
 
 // Independent builds never mount Cloud AccountProvider, SubscriptionBootstrap,
 // RealtimeProvider, SyncBootstrap, or the cloud update manager.
-import { IS_INDEPENDENT_RUNTIME } from './lib/independent/runtimeMode';
+
 import IndependentRuntimeShell from './components/independent/IndependentRuntimeShell';
 
 export default function Providers({children}:{children: ReactNode}) {
-  if (IS_INDEPENDENT_RUNTIME) return <IndependentRuntimeShell>{children}</IndependentRuntimeShell>;
+  const pathname=usePathname();
+  const independent=Boolean(pathname?.startsWith("/independent/workspace"));
+  const dbMismatch=APP_DB_NAME !== (independent ? "EleeveonIndependentDB" : "EleeveonDB");
+  useEffect(()=>{if(dbMismatch)window.location.reload();},[dbMismatch]);
+  if(dbMismatch)return <main className="p-6">Switching school workspace…</main>;
+  if (independent) return <IndependentRuntimeShell>{children}</IndependentRuntimeShell>;
   return <CloudProviders>{children}</CloudProviders>;
 }

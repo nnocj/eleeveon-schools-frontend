@@ -41,6 +41,8 @@ import { useActiveMembership } from "../context/active-membership-context";
 
 import { db, type Branch, type School } from "../lib/db/db";
 import { apiRequest } from "../lib/platformApi";
+import IndependentStaffManager from "../components/independent/IndependentStaffManager";
+import { currentLocalSession } from "../lib/independent/localStaffAuth";
 
 // ======================================================
 // TYPES
@@ -939,7 +941,7 @@ async function removeAuthAccessLocally(candidate: Candidate) {
 // COMPONENT
 // ======================================================
 
-export default function OwnerUsers() {
+function OwnerUsers() {
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -1867,3 +1869,9 @@ const css = `
 @media (min-width:1040px){.ba-page{padding:calc(16px * var(--local-density-scale,1));padding-bottom:48px}.ba-search-card,.ba-list,.ba-table-card,.ba-filter-chips{max-width:1180px;margin-left:auto;margin-right:auto}.ba-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:520px){.ba-page{padding:calc(7px * var(--local-density-scale,1));padding-bottom:max(38px,env(safe-area-inset-bottom))}.ba-search-card{grid-template-columns:minmax(0,1fr) 40px 40px 40px;gap:6px;padding:6px;border-radius:22px}.ba-icon-button,.ba-filter-button,.ba-add-inline{width:40px;height:40px}.ba-sheet-actions{display:grid;grid-template-columns:minmax(0,1fr)}.ba-sheet-actions button{width:100%}}
 `;
+
+export default function OwnerUsersModeAware(){
+ const independent=currentLocalSession();
+ if(independent?.role==='owner') return <IndependentStaffManager accountId={independent.accountId}/>;
+ return <OwnerUsers/>;
+}

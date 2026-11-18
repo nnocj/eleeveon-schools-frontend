@@ -1,5 +1,8 @@
 /** Eleeveon Schools Platform V2 database metadata. */
-export const APP_DB_NAME = "EleeveonDB" as const;
+// Separate Independent and Cloud Dexie databases on the same PWA origin.
+export const APP_DB_NAME = (typeof window !== "undefined" &&
+  window.location.pathname.startsWith("/independent/workspace")
+  ? "EleeveonIndependentDB" : "EleeveonDB");
 
 /**
  * Version 3 activates the assessment hierarchy runtime migration.

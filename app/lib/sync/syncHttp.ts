@@ -5,7 +5,7 @@
  */
 
 import { getApiBaseUrl, getAuthToken } from "./syncConfig";
-import { IS_INDEPENDENT_RUNTIME } from "../independent/runtimeMode";
+import { IS_INDEPENDENT_RUNTIME, isIndependentPwaRoute } from "../independent/runtimeMode";
 import { getAccountId } from "./syncConfig";
 import { resolveSyncPolicy } from "./resolveSyncPolicy";
 
@@ -16,7 +16,7 @@ type SyncHttpOptions = {
 };
 
 export async function syncHttp<T>(endpoint: string, options: SyncHttpOptions = {}): Promise<T> {
-  if (IS_INDEPENDENT_RUNTIME) throw new Error(`Cloud sync endpoint ${endpoint} is prohibited in Independent mode`);
+  if (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) throw new Error(`Cloud sync endpoint ${endpoint} is prohibited in Independent mode`);
   // Enforce account-scoped transport permissions even if a caller bypasses runSync.
   // /sync/policy itself is exempt so that the policy resolver can fetch it.
   const route = endpoint.split("?")[0].replace(/\/+$/, "");

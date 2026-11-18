@@ -6,3 +6,6 @@ export const ELEEVEON_RUNTIME: EleeveonRuntime =
 export const IS_INDEPENDENT_RUNTIME = ELEEVEON_RUNTIME !== 'cloud';
 /** Does not grant access. Verify a locally held signed license and local user session separately. */
 export function mayRunCloudBootstrap(): boolean { return !IS_INDEPENDENT_RUNTIME; }
+
+/** Same deployed PWA, Independent workspace isolated by pathname. */
+export function isIndependentPwaRoute():boolean { return typeof window!=="undefined" && window.location.pathname.startsWith("/independent/workspace"); }

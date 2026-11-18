@@ -612,7 +612,7 @@ export function IndependentAccountProvider({ children, session, onLock }: {
     role: session.role === "owner" ? "super_admin" : session.role,
     schoolId: local.schoolId || null,
     branchId: local.branchId || null,
-    teacherId: session.role === "teacher" ? session.id : null,
+    teacherId: null, // Must be linked to an actual local teacher profile before teacher portal authorization.
     active: true,
   };
   const user: AccountUser = {

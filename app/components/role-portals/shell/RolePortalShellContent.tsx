@@ -48,7 +48,7 @@ import { useRealtime } from "../../../context/realtime-context";
 import { useTheme } from "../../../context/theme-context";
 import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
-import { IS_INDEPENDENT_RUNTIME } from "../../../lib/independent/runtimeMode";
+import { IS_INDEPENDENT_RUNTIME, isIndependentPwaRoute } from "../../../lib/independent/runtimeMode";
 import {
   bootstrapPriorityWorkspaceTables,
   arePriorityWorkspaceTablesCached,
@@ -378,7 +378,7 @@ function RolePortalShellContent({
   }, [openedWorkspace]);
 
   const allMemberships = useMemo(() => {
-    const merged = IS_INDEPENDENT_RUNTIME ? [
+    const merged = (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) ? [
       // Never import stored Cloud memberships into an offline authenticated role.
       ...collectUserMemberships(user),
     ] : [
@@ -455,7 +455,7 @@ function RolePortalShellContent({
   ]);
 
   const selectedMembership = useMemo(() => {
-    const normalizedActive = IS_INDEPENDENT_RUNTIME
+    const normalizedActive = (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())
       ? normalizeMembership(activeMembership)
       : (normalizeMembership(activeMembership) || storedActiveMembership);
 
@@ -498,7 +498,7 @@ function RolePortalShellContent({
   ]);
 
   const effectiveSchoolId = useMemo(
-    () => IS_INDEPENDENT_RUNTIME
+    () => (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())
       ? (selectedMembership?.role === 'super_admin'
         ? (toPermanentId(activeSchoolId) || toPermanentId(selectedMembership?.schoolId))
         : toPermanentId(selectedMembership?.schoolId))
@@ -514,7 +514,7 @@ function RolePortalShellContent({
   );
 
   const effectiveBranchId = useMemo(
-    () => IS_INDEPENDENT_RUNTIME
+    () => (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())
       ? (selectedMembership?.role === 'super_admin'
         ? (toPermanentId(activeBranchId) || toPermanentId(selectedMembership?.branchId))
         : toPermanentId(selectedMembership?.branchId))
@@ -780,7 +780,7 @@ function RolePortalShellContent({
       return;
     }
 
-    if (IS_INDEPENDENT_RUNTIME) return;
+    if ((IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())) return;
 
     if (
       sessionVerified &&
@@ -1071,7 +1071,7 @@ function RolePortalShellContent({
       !accountId ||
       !membershipRestored ||
       !canAccess ||
-      IS_INDEPENDENT_RUNTIME ||
+      (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) ||
       !appearanceMatchesRole ||
       !databaseContext.ready ||
       !isOnline ||
@@ -1156,7 +1156,7 @@ function RolePortalShellContent({
   // authorized workspace. Background role sync may continue independently.
 
   const retryCurrentModule = useCallback(() => {
-    if (IS_INDEPENDENT_RUNTIME || !navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
+    if ((IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) || !navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
     // Retry the same module without refreshing the document or other modules.
     priorityAttemptedAt.current.clear();
     setPriorityError(null);
@@ -1566,7 +1566,7 @@ function RolePortalShellContent({
 
     const prepare = async () => {
       try {
-        if (IS_INDEPENDENT_RUNTIME) {
+        if ((IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())) {
           // The existing portals use Dexie. Never fetch Cloud bootstrap tables
           // to prove an Independent workspace is ready. Verify its local scope.
           if (membership.accountId !== accountId) throw new Error('Independent account mismatch');

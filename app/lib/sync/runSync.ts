@@ -18,6 +18,7 @@
  */
 
 import { pullSync } from "./pullSync";
+import { isIndependentPwaRoute } from "../independent/runtimeMode";
 import { pushSync } from "./pushSync";
 
 import {
@@ -247,6 +248,7 @@ function startNextJob(): void {
 }
 
 export function runSync(options: RunSyncOptions = {}): Promise<SyncResult> {
+  if (isIndependentPwaRoute()) return Promise.reject(new Error("Cloud synchronization is disabled for Independent school records"));
   const normalized = normalizeOptions(options);
   const accountId = getAccountId();
   if (!accountId) {

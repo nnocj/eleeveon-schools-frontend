@@ -15,6 +15,7 @@
  * - One document scroll
  */
 
+import { useEffectiveAccountPlan, effectivePlanDisplay } from "../lib/subscription/useEffectiveAccountPlan";
 import React, {
   useEffect,
   useMemo,
@@ -587,6 +588,9 @@ export default function OwnerDashboardPage({
       settingsLoading,
   } =
     useSettings();
+
+  const effective = useEffectiveAccountPlan(accountId);
+  const effectiveDisplay = effectivePlanDisplay(effective.snapshot);
 
   const primary =
     settings?.primaryColor ||
@@ -1251,7 +1255,7 @@ export default function OwnerDashboardPage({
           <header>
             <div>
               <span>
-                Subscription
+                Licence / subscription
               </span>
               <h2>
                 Account plan
@@ -1271,16 +1275,17 @@ export default function OwnerDashboardPage({
 
           <strong className="od-big">
             {
-              summary.planName
+              effectiveDisplay?.name || (effective.loading || effective.error ? "Verifying current licence" : summary.planName)
             }
           </strong>
 
           <p>
             {
-              summary.subscriptionStatus
+              effectiveDisplay?.status || (effective.loading || effective.error ? "Unverified" : summary.subscriptionStatus)
             }
           </p>
 
+          {effectiveDisplay?.independent ? <p>Perpetual Independent licence · no recurring subscription billing</p> : null}
           <div className="od-inline">
             <span>
               <b>

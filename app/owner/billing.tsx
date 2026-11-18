@@ -34,6 +34,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import TrialAccountSummary from "./components/TrialAccountSummary";
+import { useEffectiveAccountPlan, effectivePlanDisplay } from "../lib/subscription/useEffectiveAccountPlan";
 
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
@@ -236,6 +237,8 @@ export default function BillingPage() {
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
+  const effective = useEffectiveAccountPlan(accountId);
+  const effectiveDisplay = effectivePlanDisplay(effective.snapshot);
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
@@ -361,7 +364,9 @@ export default function BillingPage() {
   ];
 
   const activeCount = viewMode === "packages" ? publicPlans.length : viewMode === "invoices" ? filteredInvoices.length : viewMode === "payments" ? filteredPayments.length : viewMode === "features" ? features.length : 4;
-  const assignedKind = commercialKind(plan, subscription?.status);
+  const assignedKind = effectiveDisplay?.kind || commercialKind(plan, subscription?.status);
+  const shownPlanName = effectiveDisplay?.name || (effective.loading || effective.error ? "Verifying current licence" : plan?.name || "No package assigned");
+  const shownStatus = effectiveDisplay?.status || (effective.loading || effective.error ? "unverified" : subscription?.status);
   const studentQuotes = publicPlans.filter((item) => {
     const pricing = item.metadata?.pricing;
     return pricing?.mode === "per_student" || pricing?.mode === "tiered";
@@ -421,7 +426,8 @@ export default function BillingPage() {
         </section>
       ) : null}
 
-      <TrialAccountSummary onExplorePackages={() => router.push("/owner/subscription")} />
+      {!effectiveDisplay?.independent && !effective.loading && !effective.error ? <TrialAccountSummary onExplorePackages={() => router.push("/owner/subscription")} /> : null}
+      {effective.error ? <section className="ba-slim-notice"><p>Current licence could not be verified. The previous subscription record may be outdated. Reconnect and refresh.</p></section> : null}
 
       <section className="ba-filter-chips" aria-label="Billing views">
         <button type="button" className={viewMode === "overview" ? "active" : ""} onClick={() => setViewMode("overview")}>
@@ -445,21 +451,21 @@ export default function BillingPage() {
             <article className="billing-row">
               <span className="billing-row-icon">📦</span>
               <span className="billing-row-main">
-                <strong>{plan?.name || "No package assigned"}</strong>
-                <small>{assignedKind} · {displayStatus(subscription?.status, "No arrangement")}</small>
-                <em>{subscription?.status === "trial"
+                <strong>{shownPlanName}</strong>
+                <small>{assignedKind} · {displayStatus(shownStatus, "No arrangement")}</small>
+                <em>{!effectiveDisplay?.independent && shownStatus === "trial"
                   ? `Trial ends: ${safeDate(subscription.trialEndsAt || subscription.currentPeriodEnd)}`
-                  : subscription?.nextBillingDate
+                  : !effectiveDisplay?.independent && subscription?.nextBillingDate
                     ? `Next billing: ${safeDate(subscription.nextBillingDate)}`
-                    : "No automatic billing date shown"}</em>
+                    : effectiveDisplay?.independent ? "Perpetual licence · no recurring subscription billing" : "No automatic billing date shown"}</em>
               </span>
-              <span className="billing-row-side"><span className={`status-dot-mini ${statusTone(subscription?.status)}`} /></span>
+              <span className="billing-row-side"><span className={`status-dot-mini ${statusTone(shownStatus)}`} /></span>
             </article>
             <article className="billing-row">
               <span className="billing-row-icon">💰</span>
               <span className="billing-row-main">
                 <strong>Package pricing</strong>
-                <small>{paymentLabel(plan)}</small>
+                <small>{effectiveDisplay?.independent ? "One-time perpetual licence" : paymentLabel(plan)}</small>
                 <em>{plan?.maxStudents == null ? "No configured student cap" : `Up to ${plan.maxStudents} students`} · Quote is not an invoice</em>
               </span>
             </article>
@@ -555,10 +561,10 @@ export default function BillingPage() {
           }}
           summary={summary}
           currency={currency}
-          planName={plan?.name || "No active plan"}
-          subscriptionStatus={displayStatus(subscription?.status, "not set")}
+          planName={shownPlanName}
+          subscriptionStatus={displayStatus(shownStatus, "not set")}
           billingCycle={assignedKind}
-          nextBillingDate={subscription?.status === "trial" ? safeDate(subscription?.trialEndsAt) : safeDate(subscription?.nextBillingDate)}
+          nextBillingDate={effectiveDisplay?.independent ? "No recurring billing" : shownStatus === "trial" ? safeDate(subscription?.trialEndsAt) : safeDate(subscription?.nextBillingDate)}
           onRefresh={async () => {
             setMoreOpen(false);
             await load();

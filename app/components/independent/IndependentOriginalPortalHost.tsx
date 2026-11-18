@@ -14,7 +14,8 @@ import {IndependentRealtimeProvider} from "../../context/realtime-context";
 import {SyncBootstrapProvider, useSyncBootstrap} from "../../context/sync-bootstrap-context";
 import {SyncProvider} from "../../context/sync-context";
 import {SubscriptionProvider} from "../../context/subscription-context";
-import type {LocalSession} from "../../lib/independent/localStaffAuth";
+import {localSessionMemberships,type LocalGrant,type LocalSession} from "../../lib/independent/localStaffAuth";
+import type {UserMembership} from "../../lib/auth/roleRedirect";
 import type {OfflineLicenseClaims} from "../../lib/independent/offlineLicense";
 import IndependentBackupPanel from './IndependentBackupPanel';
 import IndependentStaffManager from './IndependentStaffManager';
@@ -36,6 +37,15 @@ function OfflineSyncStatus() {
  */
 export default function IndependentOriginalPortalHost({session,license,onLock}:{session:LocalSession;license:OfflineLicenseClaims;onLock:()=>void}) {
  const [confirmed,setConfirmed]=useState(true);
+ const [grants,setGrants]=useState<LocalGrant[]>([]);
+ const [selectedKey,setSelectedKey]=useState('owner');
+ const [grantError,setGrantError]=useState('');
+ const reloadGrants=useCallback(()=>{void localSessionMemberships(session).then(setGrants).catch(e=>setGrantError(String(e)));},[session]);
+ useEffect(()=>{reloadGrants();window.addEventListener('independent-grants-changed',reloadGrants);return()=>window.removeEventListener('independent-grants-changed',reloadGrants);},[reloadGrants]);
+ const workspaces=grants.filter(g=>g.role!=='teacher'||Boolean(g.teacherId)).map(g=>({...g,key:`${g.role}:${g.schoolId}:${g.branchId}`}));
+ const chosen=workspaces.find(g=>g.key===selectedKey);
+ const effectiveRole=chosen?.role || session.role;
+ const membership:UserMembership=chosen?{id:`independent:${session.id}:${chosen.key}`,accountId:session.accountId,role:chosen.role,schoolId:chosen.schoolId,branchId:chosen.branchId,teacherId:chosen.teacherId||null,active:true}:{id:`independent:${session.id}`,accountId:session.accountId,role:session.role==='owner'?'super_admin':session.role,schoolId:session.schoolId||null,branchId:session.branchId||null,teacherId:null,active:true};
  const [toolsOpen,setToolsOpen]=useState(false);
  const [readiness,setReadiness]=useState<DatabaseReadiness|null>(null);
  const [checkingDb,setCheckingDb]=useState(false);
@@ -53,10 +63,10 @@ export default function IndependentOriginalPortalHost({session,license,onLock}:{
   {toolsOpen && session.role==='owner' && <section className="mx-auto my-4 max-w-3xl rounded-xl border p-5"><IndependentStaffManager accountId={license.accountId}/><h2 className="mt-6 font-semibold">Owner-only local database recovery tools</h2><p className="my-2 text-sm">Backup files cover IndexedDB data, not external media directories. Never restore while other application windows are open.</p><button className="mb-3 rounded border px-3 py-2" disabled={checkingDb} onClick={()=>{setCheckingDb(true);void checkIndependentSchoolDatabase().then(setReadiness).finally(()=>setCheckingDb(false));}}>Check EleeveonDB</button>{readiness?.available && <><IndependentBackupPanel databaseName={APP_DB_NAME} accountId={license.accountId}/><IndependentRestorePanel databaseName={APP_DB_NAME} accountId={license.accountId}/></>}{readiness && !readiness.available && <p role="alert">{readiness.reason}</p>}</section>}
   {!confirmed ? <section className="mx-auto mt-12 max-w-xl rounded-xl border p-6"><h1 className="text-xl font-bold">Original Eleeveon Schools portals</h1><p className="mt-3">This screen mounts your unchanged portal components under the locally verified session. It is a development integration check; backend-only actions such as paid billing, credential issuance, account changes, and certain school modules do not yet have local services. Do not test with live student records.</p><button className="mt-5 rounded bg-blue-700 px-4 py-3 font-semibold text-white" onClick={()=>setConfirmed(true)}>Open my original {session.role.replace('_',' ')} portal</button></section> :
    <DatabaseBootstrap>
-    <IndependentAccountProvider session={session} onLock={lock}>
+    <IndependentAccountProvider session={session} selectedMembership={membership} onLock={lock}>
      <SettingsProvider>
       <ActiveBranchProvider>
-       <IndependentActiveMembershipProvider session={session}>
+       <IndependentActiveMembershipProvider key={membership.id} session={session} selectedMembership={membership}>
         <WindowChromeProvider>
          <SubscriptionProvider accountId={session.accountId} authenticated={true} autoRefresh={false}>
           <ThemeProvider>
@@ -66,7 +76,7 @@ export default function IndependentOriginalPortalHost({session,license,onLock}:{
               <SyncBootstrapProvider>
                <SyncProvider>
                 <OfflineSyncStatus/>
-                {session.role==='owner'?<OwnerPortal/>:session.role==='branch_admin'?<BranchPortal/>:<TeacherPortal/>}
+                {effectiveRole==='owner'?<OwnerPortal/>:effectiveRole==='branch_admin'?<BranchPortal/>:<TeacherPortal/>}
                </SyncProvider>
               </SyncBootstrapProvider>
              </IndependentRealtimeProvider>

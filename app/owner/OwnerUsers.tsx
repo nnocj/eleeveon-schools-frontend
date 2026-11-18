@@ -1872,6 +1872,9 @@ const css = `
 
 export default function OwnerUsersModeAware(){
  const independent=currentLocalSession();
- if(independent?.role==='owner') return <IndependentStaffManager accountId={independent.accountId}/>;
+ if(typeof window!=='undefined' && window.location.pathname.startsWith('/independent/workspace')) {
+  if(!independent || independent.role!=='owner') return <div role="alert">Independent Owner access requires local Owner authentication.</div>;
+  return <IndependentStaffManager accountId={independent.accountId}/>;
+ }
  return <OwnerUsers/>;
 }

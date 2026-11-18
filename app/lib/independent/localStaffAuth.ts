@@ -4,9 +4,10 @@
  * No Eleeveon server requests are made by this module.
  */
 export type LocalRole = 'owner' | 'branch_admin' | 'teacher';
-export type LocalStaffPublic = { id: string; accountId: string; displayName: string; role: LocalRole; active: boolean; schoolId?: string; branchId?: string };
+export type LocalGrant = { role: 'branch_admin' | 'teacher'; schoolId: string; branchId: string; teacherId?: string };
+export type LocalStaffPublic = { id: string; accountId: string; displayName: string; role: LocalRole; active: boolean; schoolId?: string; branchId?: string; grants?: LocalGrant[] };
 type StaffRecord = LocalStaffPublic & { salt: number[]; verifier: number[]; iterations: number; failed: number; lockedUntil: number; createdAt: number };
-export type LocalSession = { readonly id: string; readonly accountId: string; readonly displayName: string; readonly role: LocalRole; readonly authenticatedAt: number; readonly expiresAt: number; readonly schoolId?: string; readonly branchId?: string };
+export type LocalSession = { readonly id: string; readonly accountId: string; readonly displayName: string; readonly role: LocalRole; readonly authenticatedAt: number; readonly expiresAt: number; readonly schoolId?: string; readonly branchId?: string; readonly grants?: LocalGrant[] };
 const DB_NAME = 'eleeveon-independent-auth-v1';
 const STORE = 'staff';
 const ITERATIONS = 310_000;
@@ -49,7 +50,7 @@ async function write(record:StaffRecord):Promise<void> {
   finally {db.close();}
 }
 function validPassword(password:string):boolean {return password.length>=12 && password.length<=256;}
-function publicStaff(user:StaffRecord):LocalStaffPublic {const {id,accountId,displayName,role,active,schoolId,branchId}=user;return {id,accountId,displayName,role,active,schoolId,branchId};}
+function publicStaff(user:StaffRecord):LocalStaffPublic {const {id,accountId,displayName,role,active,schoolId,branchId,grants}=user;return {id,accountId,displayName,role,active,schoolId,branchId,grants};}
 export async function isLocalOwnerProvisioned(accountId:string):Promise<boolean> {
   return (await readAll()).some(u=>u.accountId===accountId && u.role==='owner' && u.active);
 }
@@ -100,7 +101,7 @@ export async function signInLocal(args:{accountId:string;id:string;password:stri
     throw new Error('Incorrect credentials or inactive local account');
   }
   user.failed=0;user.lockedUntil=0;await write(user);
-  session={id:user.id,accountId:user.accountId,displayName:user.displayName,role:user.role,authenticatedAt:Date.now(),expiresAt:Number.MAX_SAFE_INTEGER,schoolId:user.schoolId,branchId:user.branchId};
+  session={id:user.id,accountId:user.accountId,displayName:user.displayName,role:user.role,authenticatedAt:Date.now(),expiresAt:Number.MAX_SAFE_INTEGER,schoolId:user.schoolId,branchId:user.branchId,grants:user.grants || (user.role==='owner'?[]:[{role:user.role,schoolId:user.schoolId||'',branchId:user.branchId||''}])};
   return session;
 }
 export function currentLocalSession():LocalSession|null {
@@ -130,4 +131,25 @@ export async function createLocalStaff(args:{accountId:string;displayName:string
 export async function setLocalStaffActive(accountId:string,id:string,active:boolean):Promise<void>{
  requireLocalSession(accountId,['owner']);
  const d=await openDb();try{await new Promise<void>((resolve,reject)=>{const t=d.transaction(STORE,'readwrite');const store=t.objectStore(STORE);const request=store.get(id);request.onsuccess=()=>{const record=request.result as StaffRecord|undefined;if(!record||record.accountId!==accountId||record.role==='owner'){t.abort();return;}store.put({...record,active});};request.onerror=()=>t.abort();t.oncomplete=()=>resolve();t.onerror=()=>reject(t.error??new Error('Unable to change staff status'));t.onabort=()=>reject(new Error('Staff not found or owner account protected'));});}finally{d.close();}
+}
+
+export async function addLocalStaffGrant(args:{accountId:string;staffId:string;grant:LocalGrant}):Promise<void>{
+ requireLocalSession(args.accountId,['owner']);
+ if(!args.grant.schoolId || !args.grant.branchId)throw new Error('School and branch required');
+ const d=await openDb();try{await new Promise<void>((resolve,reject)=>{
+  const tx=d.transaction(STORE,'readwrite');const store=tx.objectStore(STORE);const req=store.get(args.staffId);
+  req.onsuccess=()=>{const record=req.result as StaffRecord|undefined;
+   if(!record||record.accountId!==args.accountId||!record.active){tx.abort();return;}
+   const grants:LocalGrant[]=record.grants || (record.role==='owner'?[]:[{role:record.role,schoolId:record.schoolId||'',branchId:record.branchId||''}]);
+   if(!grants.some(g=>g.role===args.grant.role&&g.schoolId===args.grant.schoolId&&g.branchId===args.grant.branchId))
+    store.put({...record,grants:[...grants,args.grant]});
+  };req.onerror=()=>tx.abort();tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||new Error('Grant failed'));
+  tx.onabort=()=>reject(new Error('Staff not found or inactive'));
+ });}finally{d.close();}
+}
+export async function localSessionMemberships(current:LocalSession):Promise<LocalGrant[]>{
+ const record=(await readAll()).find(u=>u.id===current.id&&u.accountId===current.accountId&&u.active);
+ if(!record)throw new Error('Local staff session is no longer active');
+ const primary:LocalGrant[]=record.role==='owner'?[]:[{role:record.role,schoolId:record.schoolId||'',branchId:record.branchId||''}];
+ return [...primary,...(record.grants||[])].filter((g,i,a)=>g.schoolId&&g.branchId&&a.findIndex(x=>x.role===g.role&&x.schoolId===g.schoolId&&x.branchId===g.branchId)===i);
 }

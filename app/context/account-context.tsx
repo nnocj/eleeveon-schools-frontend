@@ -587,9 +587,10 @@ export function useAccount() {
  */
 import type { LocalSession as IndependentLocalSession } from "../lib/independent/localStaffAuth";
 import { currentLocalSession as independentCurrentSession } from "../lib/independent/localStaffAuth";
-export function IndependentAccountProvider({ children, session, onLock }: {
+export function IndependentAccountProvider({ children, session, selectedMembership, onLock }: {
   children: React.ReactNode;
   session: IndependentLocalSession;
+  selectedMembership?: UserMembership;
   onLock: () => void;
 }) {
   const [valid, setValid] = React.useState(true);
@@ -606,7 +607,7 @@ export function IndependentAccountProvider({ children, session, onLock }: {
     return () => window.clearInterval(timer);
   }, [session, onLock]);
   const local = session as IndependentLocalSession & {schoolId?:string;branchId?:string};
-  const membership: UserMembership = {
+  const membership: UserMembership = selectedMembership || {
     id: `independent:${session.id}`,
     accountId: session.accountId,
     role: session.role === "owner" ? "super_admin" : session.role,

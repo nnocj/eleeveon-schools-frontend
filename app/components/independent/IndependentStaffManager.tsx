@@ -1,9 +1,10 @@
 "use client";
 import React,{useEffect,useState} from 'react';
 import {db} from '../../lib/db/db';
-import {createLocalStaff,listLocalStaff,setLocalStaffActive,type LocalStaffPublic} from '../../lib/independent/localStaffAuth';
+import {createLocalStaff,listLocalStaff,setLocalStaffActive,addLocalStaffGrant,currentLocalSession,type LocalStaffPublic} from '../../lib/independent/localStaffAuth';
 export default function IndependentStaffManager({accountId}:{accountId:string}){
  const [schools,setSchools]=useState<any[]>([]),[branches,setBranches]=useState<any[]>([]),[staff,setStaff]=useState<LocalStaffPublic[]>([]);
+ const [grantStaffId,setGrantStaffId]=useState('');
  const [name,setName]=useState(''),[password,setPassword]=useState(''),[role,setRole]=useState<'branch_admin'|'teacher'>('branch_admin');
  const [schoolId,setSchoolId]=useState(''),[branchId,setBranchId]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  async function refresh(){const [ss,bb,uu]=await Promise.all([db.schools.toArray(),db.branches.toArray(),listLocalStaff(accountId)]);setSchools(ss.filter((s:any)=>s.accountId===accountId&&!s.isDeleted));setBranches(bb.filter((b:any)=>b.accountId===accountId&&!b.isDeleted));setStaff(uu);}

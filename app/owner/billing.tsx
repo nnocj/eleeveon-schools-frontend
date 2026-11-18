@@ -454,7 +454,7 @@ export default function BillingPage() {
                 <strong>{shownPlanName}</strong>
                 <small>{assignedKind} · {displayStatus(shownStatus, "No arrangement")}</small>
                 <em>{!effectiveDisplay?.independent && shownStatus === "trial"
-                  ? `Trial ends: ${safeDate(subscription.trialEndsAt || subscription.currentPeriodEnd)}`
+                  ? `Trial ends: ${safeDate(subscription?.trialEndsAt || subscription?.currentPeriodEnd)}`
                   : !effectiveDisplay?.independent && subscription?.nextBillingDate
                     ? `Next billing: ${safeDate(subscription.nextBillingDate)}`
                     : effectiveDisplay?.independent ? "Perpetual licence · no recurring subscription billing" : "No automatic billing date shown"}</em>

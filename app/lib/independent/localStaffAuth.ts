@@ -145,7 +145,7 @@ export async function addLocalStaffGrant(args:{accountId:string;staffId:string;g
     store.put({...record,grants:[...grants,args.grant]});
   };req.onerror=()=>tx.abort();tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||new Error('Grant failed'));
   tx.onabort=()=>reject(new Error('Staff not found or inactive'));
- });}finally{d.close();}
+ });window.dispatchEvent(new Event('independent-grants-changed'));}finally{d.close();}
 }
 export async function localSessionMemberships(current:LocalSession):Promise<LocalGrant[]>{
  const record=(await readAll()).find(u=>u.id===current.id&&u.accountId===current.accountId&&u.active);

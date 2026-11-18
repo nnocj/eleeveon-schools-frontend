@@ -42,7 +42,7 @@ import { useActiveMembership } from "../context/active-membership-context";
 import { db, type Branch, type School } from "../lib/db/db";
 import { apiRequest } from "../lib/platformApi";
 import IndependentStaffManager from "../components/independent/IndependentStaffManager";
-import { currentLocalSession } from "../lib/independent/localStaffAuth";
+import {currentLocalSession} from "../lib/independent/localStaffAuth";
 
 // ======================================================
 // TYPES
@@ -644,7 +644,6 @@ function cleanUpdateAccountUserDto(form: FormState) {
   return {
     fullName: form.fullName.trim(),
     phone: normalizePhone(form.phone) || undefined,
-    role: form.role,
   };
 }
 
@@ -667,6 +666,17 @@ async function saveBackendOwnerAccess(args: {
   let user =
     (args.form.userId ? args.users.find((row) => String(userIdOf(row) || "") === String(args.form.userId)) : undefined) ||
     args.users.find((row) => normalizeEmail(row.email) === email);
+
+  // The displayed list may be filtered or stale. Never create a second identity
+  // until the unfiltered account-wide list has been checked.
+  if (!user && !args.form.userId) {
+    const allUsersResponse = await fetchBackendOwnerUsers({});
+    const accountUsers = extractBackendUsersAndMemberships(allUsersResponse);
+    user = accountUsers.users.find(row => normalizeEmail(row.email) === email);
+    if (user) {
+      args.memberships = dedupeMemberships([...args.memberships, ...accountUsers.memberships]);
+    }
+  }
 
   let membershipsFromCreatedUser: UserMembership[] = [];
 
@@ -1276,11 +1286,15 @@ function OwnerUsers() {
     if (ROLES.find((role) => role.value === form.role)?.branchRequired && !form.branchId) {
       return `${roleLabel(form.role)} role must be assigned to a branch.`;
     }
-    if (!form.temporaryPassword.trim()) return "Temporary password is required.";
+    if (!form.userId && !form.temporaryPassword.trim()) return "Temporary password is required when creating a new identity.";
     return "";
   };
 
   const saveAccess = async () => {
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/independent/')) {
+      setMessage('Independent staff access must be managed through the local Independent staff manager.');
+      return;
+    }
     const error = validate();
     if (error) {
       setMessage(error);
@@ -1870,11 +1884,15 @@ const css = `
 @media (max-width:520px){.ba-page{padding:calc(7px * var(--local-density-scale,1));padding-bottom:max(38px,env(safe-area-inset-bottom))}.ba-search-card{grid-template-columns:minmax(0,1fr) 40px 40px 40px;gap:6px;padding:6px;border-radius:22px}.ba-icon-button,.ba-filter-button,.ba-add-inline{width:40px;height:40px}.ba-sheet-actions{display:grid;grid-template-columns:minmax(0,1fr)}.ba-sheet-actions button{width:100%}}
 `;
 
+// Independent workspaces must never silently fall back to Cloud user creation.
+// The local Owner identity is authenticated by localStaffAuth, not by an email API.
+
 export default function OwnerUsersModeAware(){
- const independent=currentLocalSession();
- if(typeof window!=='undefined' && window.location.pathname.startsWith('/independent/workspace')) {
-  if(!independent || independent.role!=='owner') return <div role="alert">Independent Owner access requires local Owner authentication.</div>;
-  return <IndependentStaffManager accountId={independent.accountId}/>;
+ const independent = typeof window !== 'undefined' && window.location.pathname.startsWith('/independent/');
+ if(independent){
+  const session=currentLocalSession();
+  if(!session || session.role!=='owner') return <div role="alert">Sign in locally as the Independent Owner to manage users.</div>;
+  return <IndependentStaffManager accountId={session.accountId}/>;
  }
  return <OwnerUsers/>;
 }

@@ -29,10 +29,26 @@ export async function backupIndependentToFolder(options: { databaseName: string;
 
 export async function chooseBackupFolder(): Promise<DirectoryHandle> {
   const picker = (globalThis as typeof globalThis & { showDirectoryPicker?: (opts?: { mode: "readwrite" }) => Promise<DirectoryHandle> }).showDirectoryPicker;
-  if (!picker) throw new Error("Folder selection is not available in this runtime. A native filesystem adapter is required for this device.");
+  if (!picker) throw new Error("Folder selection is not available in this runtime. Use the encrypted backup download option on browsers without folder access.");
   return picker({ mode: "readwrite" });
 }
 
 export async function inspectBackupFile(file: { text(): Promise<string> }, passphrase: string, databaseName: string) {
   return inspectEncryptedBackup(await file.text(), passphrase, databaseName);
+}
+
+/** Browser-safe fallback for Safari/Firefox: download an encrypted recovery file.
+ * The user controls its destination; browser security prevents arbitrary folder writes.
+ */
+export async function downloadIndependentEncryptedBackup(options: {databaseName:string;accountId:string;passphrase:string}):Promise<BackupResult> {
+  const snapshot=await captureSchoolDatabase(options.databaseName,options.accountId);
+  const expected=validateSnapshot(snapshot,options.databaseName);
+  const content=JSON.stringify(await encryptSchoolArchive(snapshot,options.passphrase));
+  const actual=await inspectEncryptedBackup(content,options.passphrase,options.databaseName);
+  if(actual.records!==expected.records||actual.tables!==expected.tables||actual.createdAt!==expected.createdAt)throw new Error("Encrypted backup failed verification");
+  const filename=`eleeveon-${snapshot.createdAt.replace(/[:.]/g,"-")}-${crypto.randomUUID().slice(0,8)}.eleeveonbak`;
+  const url=URL.createObjectURL(new Blob([content],{type:"application/octet-stream"}));
+  try {const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();}
+  finally {setTimeout(()=>URL.revokeObjectURL(url),60000);}
+  return {filename,...actual,bytes:new Blob([content]).size,verified:true};
 }

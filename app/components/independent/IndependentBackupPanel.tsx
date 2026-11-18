@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { authorizeDrive, listDriveBackups, uploadEncryptedDriveBackup, downloadDriveBackup, type DriveBackup } from "../../lib/independent/googleDriveBackup";
-import { backupIndependentToFolder, chooseBackupFolder, inspectBackupFile } from "../../lib/independent/folderBackup";
+import { backupIndependentToFolder, chooseBackupFolder, inspectBackupFile, downloadIndependentEncryptedBackup } from "../../lib/independent/folderBackup";
 
 /** Owner-only; parent must verify the installed license and local Owner session. */
 export default function IndependentBackupPanel({ databaseName, accountId }: { databaseName: string; accountId: string }) {
@@ -29,6 +29,15 @@ export default function IndependentBackupPanel({ databaseName, accountId }: { da
     } catch (e) { setError(e instanceof Error ? e.message : "Backup failed or could not be verified."); }
     finally { setBusy(false); }
   }
+  async function download() {
+    if(busy)return;
+    setError("");setMessage("");
+    if(password.length<12){setError("Use a backup passphrase of at least 12 characters.");return;}
+    setBusy(true);
+    try {const result=await downloadIndependentEncryptedBackup({databaseName,accountId,passphrase:password});setMessage(`Encrypted backup verified and download started: ${result.filename}. Confirm the file is saved before clearing this device.`);setPassword("");}
+    catch(e){setError(e instanceof Error?e.message:"Backup download failed");}
+    finally{setBusy(false);}
+  }
   async function inspect(file: File | undefined) {
     if (!file || busy) return;
     setError(""); setMessage("");
@@ -46,6 +55,8 @@ export default function IndependentBackupPanel({ databaseName, accountId }: { da
     <label htmlFor="independent-backup-password" className="mt-4 block text-sm font-medium">Backup passphrase (minimum 12 characters)</label>
     <div className="mt-2 flex gap-2"><input id="independent-backup-password" type={visible ? "text" : "password"} autoComplete="off" value={password} onChange={e => setPassword(e.target.value)} className="min-w-0 flex-1 rounded-xl border border-zinc-300 bg-transparent px-3 py-2 dark:border-white/20" /><button type="button" className="rounded-xl border px-3" aria-label={visible ? "Hide passphrase" : "Show passphrase"} onClick={()=>setVisible(!visible)}>{visible ? "Hide" : "Show"}</button></div>
     <button type="button" disabled={busy} onClick={() => void save()} className="mt-4 rounded-xl bg-zinc-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-zinc-950">{busy ? "Verifying…" : "Create and verify encrypted backup"}</button>
+    <button type="button" disabled={busy} onClick={()=>void download()} className="ml-2 mt-4 rounded-xl border px-4 py-3 text-sm disabled:opacity-50">Download encrypted backup file</button>
+    <p className="mt-2 text-xs">Folder selection requires a compatible browser. The download option works without a filesystem folder picker.</p>
     <div className="mt-5 rounded-xl border p-3 space-y-3">
       <h3 className="font-semibold">Direct Google Drive backup</h3>
       <p className="text-xs">Uses your Google account without Google Drive desktop. Drive access is limited to files this app creates or opens. Backup passphrase is never uploaded.</p>

@@ -18,8 +18,6 @@
  */
 
 import { pullSync } from "./pullSync";
-import { IS_INDEPENDENT_RUNTIME } from "../independent/runtimeMode";
-import { persistIndependentDatabase } from "../independent/persistIndependentDatabase";
 import { pushSync } from "./pushSync";
 
 import {
@@ -315,20 +313,11 @@ async function executeSync(job: SyncJob): Promise<RunOutcome> {
       yielded: false,
     };
   }
-  // Independent has NO cloud transport. The same Dexie CRUD remains intact;
-  // a sync request commits a verified, encrypted native snapshot instead.
-  if (IS_INDEPENDENT_RUNTIME) {
-    try {
-      const stored = await persistIndependentDatabase(accountId);
-      setLastSyncError(null);
-      setLastSyncOkAt(Date.now());
-      return { value: report({ ok: true, startedAt, errors: [], pushed: 0, pulled: 0 }), yielded: false };
-    } catch (error) {
-      const message = `Independent local persistence failed: ${error instanceof Error ? error.message : String(error)}`;
-      setLastSyncError(message);
-      return { value: report({ ok: false, startedAt, errors: [message] }), yielded: false };
-    }
-  }
+  // All editions use the SAME PWA and Dexie database. Never infer an
+  // account's commercial entitlement from a build-time environment variable.
+  // The server-authoritative account policy below determines cloud transport.
+  // Independent data is retained in Dexie; encrypted Drive/file backups are
+  // explicit, separate operations (not native-only snapshots on every sync).
   if (!registryAudited) {
     assertSyncRegistryMatchesDatabase();
     registryAudited = true;
@@ -342,7 +331,13 @@ async function executeSync(job: SyncJob): Promise<RunOutcome> {
   });
   activeMode = policy.mode;
   emit();
+  // Defense in depth: an inconsistent backend response must never enable
+  // school-record push/pull for an offline or platform-only account.
   const plan = createSyncExecutionPlan(policy, options);
+  if (policy.mode === "offline" || policy.mode === "hybrid") {
+    plan.shouldPush = false;
+    plan.shouldPull = false;
+  }
 
   if (policy.mode === "offline") {
     let errors: string[] = [];

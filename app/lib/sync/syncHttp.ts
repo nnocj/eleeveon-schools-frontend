@@ -6,6 +6,8 @@
 
 import { getApiBaseUrl, getAuthToken } from "./syncConfig";
 import { IS_INDEPENDENT_RUNTIME } from "../independent/runtimeMode";
+import { getAccountId } from "./syncConfig";
+import { resolveSyncPolicy } from "./resolveSyncPolicy";
 
 type SyncHttpOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -15,6 +17,18 @@ type SyncHttpOptions = {
 
 export async function syncHttp<T>(endpoint: string, options: SyncHttpOptions = {}): Promise<T> {
   if (IS_INDEPENDENT_RUNTIME) throw new Error(`Cloud sync endpoint ${endpoint} is prohibited in Independent mode`);
+  // Enforce account-scoped transport permissions even if a caller bypasses runSync.
+  // /sync/policy itself is exempt so that the policy resolver can fetch it.
+  const route = endpoint.split("?")[0].replace(/\/+$/, "");
+  if (route === "/sync/push" || route === "/sync/pull") {
+    const accountId = getAccountId();
+    if (!accountId) throw new Error("Cloud sync blocked: account is not selected.");
+    const policy = await resolveSyncPolicy(accountId);
+    const allowed = route === "/sync/push" ? policy.allowPush : policy.allowPull;
+    if (!allowed || policy.mode === "offline" || policy.mode === "hybrid" || policy.mode === "read_only" && route === "/sync/push") {
+      throw new Error(`Cloud ${route} blocked by account sync policy (${policy.mode}).`);
+    }
+  }
   const baseUrl = getApiBaseUrl();
   const token = getAuthToken();
   const url = `${baseUrl}${endpoint}`;

@@ -122,6 +122,7 @@ import {
 import { genericEntityToMarker, type MapMarker } from "../../lib/maps";
 
 import { resolveAdmissionNumber } from "../../lib/students/admissionNumbers";
+import { isIndependentAdmissionAccount, createIndependentStudentWithAdmission } from "../../lib/students/independentAdmission";
 import { assertLocalStudentCapacity } from "../../lib/commercial/studentCapacity";
 import StudentCapacityStrip from "../../components/commercial/StudentCapacityStrip";
 import { processStudentPromotions, type StudentPromotionDraft } from "./Promotion";
@@ -2560,7 +2561,8 @@ export default function StudentsPage() {
         await assertLocalStudentCapacity(accountId, 1);
       }
 
-      const resolvedAdmission = !form.id
+      const independentAdmission = !form.id && await isIndependentAdmissionAccount(accountId);
+      const resolvedAdmission = !form.id && !independentAdmission
         ? await resolveAdmissionNumber({ accountId, schoolId, branchId, supplied: form.admissionNumber })
         : { admissionNumber: form.admissionNumber.trim() || undefined, provisional: false };
 
@@ -2632,10 +2634,12 @@ export default function StudentsPage() {
               String(form.id),
               payload,
             )
-          : await createLocal(
-              "students",
-              payload as unknown as Student,
-            );
+          : independentAdmission
+            ? await createIndependentStudentWithAdmission({ accountId, schoolId, branchId, supplied: form.admissionNumber, student: payload })
+            : await createLocal(
+                "students",
+                payload as unknown as Student,
+              );
 
       const savedStudentId = savedEntityId(
         savedStudent,

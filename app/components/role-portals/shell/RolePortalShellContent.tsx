@@ -49,6 +49,7 @@ import { useTheme } from "../../../context/theme-context";
 import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
 import { IS_INDEPENDENT_RUNTIME, isIndependentPwaRoute } from "../../../lib/independent/runtimeMode";
+import { currentLocalSession } from "../../../lib/independent/localStaffAuth";
 import {
   bootstrapPriorityWorkspaceTables,
   arePriorityWorkspaceTablesCached,
@@ -272,6 +273,14 @@ function RolePortalShellContent({
   requireBranch = true,
   navigationMode = "sidebar",
 }: RolePortalShellProps) {
+  // The Independent host mounts the ORIGINAL /owner and /branch-admin
+  // components. Their pathnames are Cloud-shaped, so pathname-based runtime
+  // detection alone cannot recognize them.
+  const localSession = currentLocalSession();
+  const independentWorkspace = Boolean(
+    localSession &&
+    localSession.expiresAt > Date.now()
+  ) || IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute();
   const branchWorkspaceLayout = navigationMode === "branch-workspace";
   const router = useRouter();
 
@@ -378,7 +387,7 @@ function RolePortalShellContent({
   }, [openedWorkspace]);
 
   const allMemberships = useMemo(() => {
-    const merged = (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) ? [
+    const merged = independentWorkspace ? [
       // Never import stored Cloud memberships into an offline authenticated role.
       ...collectUserMemberships(user),
     ] : [
@@ -417,6 +426,7 @@ function RolePortalShellContent({
     account,
     user,
     storedActiveMembership,
+    independentWorkspace,
   ]);
 
   const protectedProfilePortal = useMemo(
@@ -455,7 +465,7 @@ function RolePortalShellContent({
   ]);
 
   const selectedMembership = useMemo(() => {
-    const normalizedActive = (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())
+    const normalizedActive = independentWorkspace
       ? normalizeMembership(activeMembership)
       : (normalizeMembership(activeMembership) || storedActiveMembership);
 
@@ -495,10 +505,11 @@ function RolePortalShellContent({
     activeBranchId,
     protectedProfilePortal,
     matchingMemberships,
+    independentWorkspace,
   ]);
 
   const effectiveSchoolId = useMemo(
-    () => (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())
+    () => independentWorkspace
       ? (selectedMembership?.role === 'super_admin'
         ? (toPermanentId(activeSchoolId) || toPermanentId(selectedMembership?.schoolId))
         : toPermanentId(selectedMembership?.schoolId))
@@ -514,7 +525,7 @@ function RolePortalShellContent({
   );
 
   const effectiveBranchId = useMemo(
-    () => (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())
+    () => independentWorkspace
       ? (selectedMembership?.role === 'super_admin'
         ? (toPermanentId(activeBranchId) || toPermanentId(selectedMembership?.branchId))
         : toPermanentId(selectedMembership?.branchId))
@@ -780,7 +791,7 @@ function RolePortalShellContent({
       return;
     }
 
-    if ((IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())) return;
+    if (independentWorkspace) return;
 
     if (
       sessionVerified &&
@@ -938,6 +949,7 @@ function RolePortalShellContent({
    */
   useEffect(() => {
     if (
+      independentWorkspace ||
       !authenticated ||
       !sessionVerified ||
       !accountId ||
@@ -1071,7 +1083,7 @@ function RolePortalShellContent({
       !accountId ||
       !membershipRestored ||
       !canAccess ||
-      (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) ||
+      independentWorkspace ||
       !appearanceMatchesRole ||
       !databaseContext.ready ||
       !isOnline ||
@@ -1156,7 +1168,7 @@ function RolePortalShellContent({
   // authorized workspace. Background role sync may continue independently.
 
   const retryCurrentModule = useCallback(() => {
-    if ((IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) || !navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
+    if (independentWorkspace || !navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
     // Retry the same module without refreshing the document or other modules.
     priorityAttemptedAt.current.clear();
     setPriorityError(null);
@@ -1566,10 +1578,18 @@ function RolePortalShellContent({
 
     const prepare = async () => {
       try {
-        if ((IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute())) {
+        if (independentWorkspace) {
           // The existing portals use Dexie. Never fetch Cloud bootstrap tables
           // to prove an Independent workspace is ready. Verify its local scope.
+          if (!localSession || localSession.expiresAt <= Date.now() ||
+              localSession.accountId !== accountId) {
+            throw new Error('Independent local session is missing or expired. Lock the installation and sign in locally.');
+          }
           if (membership.accountId !== accountId) throw new Error('Independent account mismatch');
+          const localRole = localSession.role === 'owner' ? 'super_admin' : localSession.role;
+          if (membership.role !== localRole) {
+            throw new Error('The selected role does not match the authenticated Independent staff session.');
+          }
           if (membership.schoolId) {
             const school = await db.schools.get(membership.schoolId);
             if (!school || school.accountId !== accountId) throw new Error('The selected Independent school was not found in this local database');

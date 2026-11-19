@@ -32,6 +32,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
 import TrialAccountSummary from "./components/TrialAccountSummary";
 import { useEffectiveAccountPlan, effectivePlanDisplay } from "../lib/subscription/useEffectiveAccountPlan";
@@ -253,6 +254,7 @@ export default function BillingPage() {
   const [publicPlans, setPublicPlans] = useState<CommercialPlan[]>([]);
   const [catalogError, setCatalogError] = useState("");
   const [studentCount, setStudentCount] = useState(200);
+  const [showLicenseQr, setShowLicenseQr] = useState(false);
   const [licenseRecoveryBusy, setLicenseRecoveryBusy] = useState(false);
   const [recoveredLicense, setRecoveredLicense] = useState<{licenseId: string; licenseKey: string} | null>(null);
   const [licenseRecoveryError, setLicenseRecoveryError] = useState("");
@@ -260,6 +262,7 @@ export default function BillingPage() {
   async function recoverIndependentLicense() {
     if (licenseRecoveryBusy) return;
     setRecoveredLicense(null);
+    setShowLicenseQr(false);
     setLicenseRecoveryError("");
     if (!window.confirm("Reveal your Independent licence key on this screen? Make sure nobody else can see your display.")) return;
     setLicenseRecoveryBusy(true);
@@ -467,9 +470,14 @@ export default function BillingPage() {
         {recoveredLicense ? <div style={{padding: 12, overflowWrap: "anywhere"}}>
           <p><strong>Licence ID:</strong> {recoveredLicense.licenseId}</p>
           <p><strong>Licence key:</strong> <code>{recoveredLicense.licenseKey}</code></p>
+          {showLicenseQr ? <div style={{marginTop:12,display:"grid",gap:8,justifyItems:"start"}}>
+            <div style={{background:"white",padding:16,borderRadius:12}}><QRCodeSVG size={220} marginSize={2} value={JSON.stringify({type:"eleeveon-independent-activation",version:1,accountId,licenseId:recoveredLicense.licenseId,licenseKey:recoveredLicense.licenseKey})}/></div>
+            <small>This QR contains your actual licence key. Display it privately, never screenshot or share it, and hide it immediately after scanning. Activation still requires owner sign-in and server verification.</small>
+          </div> : null}
           <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8}}>
             <button type="button" className="billing-package-action" onClick={() => void navigator.clipboard.writeText(recoveredLicense.licenseKey).catch(() => setLicenseRecoveryError("Copy failed. Select and copy the displayed key manually."))}>Copy key</button>
-            <button type="button" className="billing-package-action" onClick={() => setRecoveredLicense(null)}>Hide key</button>
+            <button type="button" className="billing-package-action" onClick={() => setShowLicenseQr(v => !v)}>{showLicenseQr ? "Hide QR" : "Show activation QR"}</button>
+            <button type="button" className="billing-package-action" onClick={() => {setRecoveredLicense(null);setShowLicenseQr(false);}}>Hide key</button>
           </div>
         </div> : null}
       </section>

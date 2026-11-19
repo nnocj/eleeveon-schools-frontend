@@ -18,6 +18,7 @@ import { permittedOfflineMemberships } from "../lib/auth/offlineMembershipPolicy
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { readVerifiedBrowserLicense } from "../lib/independent/browserLicense";
 import { useRouter } from "next/navigation";
 
 import { useAccount } from "../context/account-context";
@@ -383,7 +384,7 @@ function Chip({
   );
 }
 
-export default function SelectRolePage() {
+function CloudSelectRolePage() {
   const router = useRouter();
 
   const {
@@ -1418,3 +1419,28 @@ const css = `
   }
 }
 `;
+// Independent staff never use Cloud membership restoration. The activated
+// browser installation owns its own password and workspace selection flow.
+export default function SelectRolePage() {
+  const [mode, setMode] = useState<"checking" | "cloud">("checking");
+  useEffect(() => {
+    let active = true;
+    if (new URLSearchParams(window.location.search).get("cloud") === "1") {
+      setMode("cloud");
+      return;
+    }
+    void readVerifiedBrowserLicense().then(license => {
+      if (!active) return;
+      if (license) window.location.replace("/independent/workspace");
+      else setMode("cloud");
+    }).catch(() => {
+      if (!active) return;
+      if (localStorage.getItem("eleeveon_independent_browser_license_v1")) {
+        window.location.replace("/independent/workspace");
+      } else setMode("cloud");
+    });
+    return () => { active = false; };
+  }, []);
+  if (mode === "checking") return <main className="min-h-dvh grid place-items-center p-6">Opening installed workspace…</main>;
+  return <CloudSelectRolePage />;
+}

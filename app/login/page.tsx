@@ -16,7 +16,7 @@
  *   teacher, student, and parent routing.
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 import WorkspaceBootstrapScreen from "../components/WorkspaceBootstrapScreen";
 import {
@@ -24,6 +24,7 @@ import {
   type WorkspaceBootstrapProgress,
 } from "../lib/sync/workspaceBootstrap";
 import { useRouter } from "next/navigation";
+import { readVerifiedBrowserLicense } from "../lib/independent/browserLicense";
 
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
 import { setAccountId } from "../lib/sync/syncConfig";
@@ -301,6 +302,32 @@ function openPath(router: ReturnType<typeof useRouter>, path: string) {
 
 export default function LoginPage() {
   const router = useRouter();
+  const [independentCheck, setIndependentCheck] = useState(true);
+  useEffect(() => {
+    let mounted = true;
+    // Cloud account services remain explicitly reachable with ?cloud=1.
+    if (new URLSearchParams(window.location.search).get("cloud") === "1") {
+      setIndependentCheck(false);
+      return;
+    }
+    void readVerifiedBrowserLicense().then(result => {
+      if (!mounted) return;
+      if (result) window.location.replace("/independent/workspace");
+      else setIndependentCheck(false);
+    }).catch(error => {
+      // Do not silently fall through to Cloud if an installed certificate
+      // exists but fails validation.
+      if (!mounted) return;
+      if (localStorage.getItem("eleeveon_independent_browser_license_v1")) {
+        window.location.replace("/independent/workspace");
+      } else {
+        console.warn("Independent licence check unavailable:", error);
+        setIndependentCheck(false);
+      }
+    });
+    return () => { mounted = false; };
+  }, []);
+
 
   const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
@@ -317,7 +344,7 @@ export default function LoginPage() {
   };
 
   const submit = async () => {
-    if (loading) return;
+    if (loading || independentCheck) return;
     if (!form.email.trim()) return alert("Enter your email address");
     if (!form.password.trim()) return alert("Enter your password");
 
@@ -523,6 +550,8 @@ export default function LoginPage() {
         );
       }
     };
+
+  if (independentCheck) return <main className="login-page"><p>Checking installed Independent workspace…</p></main>;
 
   return (
     <main className="login-page">

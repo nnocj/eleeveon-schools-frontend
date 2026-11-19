@@ -15,6 +15,7 @@ import {SyncBootstrapProvider, useSyncBootstrap} from "../../context/sync-bootst
 import {SyncProvider} from "../../context/sync-context";
 import {SubscriptionProvider} from "../../context/subscription-context";
 import {localSessionMemberships,type LocalGrant,type LocalSession} from "../../lib/independent/localStaffAuth";
+import {IndependentPortalIdentityProvider} from "../../lib/independent/independentPortalContext";
 import type {UserMembership} from "../../lib/auth/roleRedirect";
 import type {OfflineLicenseClaims} from "../../lib/independent/offlineLicense";
 import IndependentBackupPanel from './IndependentBackupPanel';

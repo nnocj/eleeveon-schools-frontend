@@ -49,7 +49,7 @@ import { useTheme } from "../../../context/theme-context";
 import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
 import { IS_INDEPENDENT_RUNTIME, isIndependentPwaRoute } from "../../../lib/independent/runtimeMode";
-import { currentLocalSession } from "../../../lib/independent/localStaffAuth";
+import { useIndependentPortalIdentity } from "../../../lib/independent/independentPortalContext";
 import {
   bootstrapPriorityWorkspaceTables,
   arePriorityWorkspaceTablesCached,
@@ -273,14 +273,11 @@ function RolePortalShellContent({
   requireBranch = true,
   navigationMode = "sidebar",
 }: RolePortalShellProps) {
-  // The Independent host mounts the ORIGINAL /owner and /branch-admin
-  // components. Their pathnames are Cloud-shaped, so pathname-based runtime
-  // detection alone cannot recognize them.
-  const localSession = currentLocalSession();
-  const independentWorkspace = Boolean(
-    localSession &&
-    localSession.expiresAt > Date.now()
-  ) || IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute();
+  // The Independent host mounts the original /owner and /branch-admin pages.
+  // Those URLs are not Independent routes, so use explicit host context.
+  const independentIdentity = useIndependentPortalIdentity();
+  const independentWorkspace = Boolean(independentIdentity) ||
+    IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute();
   const branchWorkspaceLayout = navigationMode === "branch-workspace";
   const router = useRouter();
 
@@ -1579,17 +1576,34 @@ function RolePortalShellContent({
     const prepare = async () => {
       try {
         if (independentWorkspace) {
+          // Verify the Independent host's licensed session and exact membership.
+          // The build-time Independent runtime may also reach this branch;
+          // it must have a verified host identity to open a portal.
+          const identity = independentIdentity;
+          if (!identity || identity.session.expiresAt <= Date.now() ||
+              identity.session.accountId !== accountId ||
+              identity.license.accountId !== accountId) {
+            throw new Error("Independent local authentication is missing or expired. Lock and sign in to the licensed installation.");
+          }
+          const local = identity.session;
+          const role = String(membership.role || "").toLowerCase();
+          const authorized = local.role === "owner"
+            ? role === "super_admin"
+            : role === local.role &&
+              (local.grants || [{
+                role: local.role, schoolId: local.schoolId || "",
+                branchId: local.branchId || "",
+              }]).some(grant =>
+                grant.role === role &&
+                grant.schoolId === membership.schoolId &&
+                grant.branchId === membership.branchId
+              );
+          if (!authorized) {
+            throw new Error("The selected Independent role or branch is not assigned to this local staff member.");
+          }
           // The existing portals use Dexie. Never fetch Cloud bootstrap tables
           // to prove an Independent workspace is ready. Verify its local scope.
-          if (!localSession || localSession.expiresAt <= Date.now() ||
-              localSession.accountId !== accountId) {
-            throw new Error('Independent local session is missing or expired. Lock the installation and sign in locally.');
-          }
           if (membership.accountId !== accountId) throw new Error('Independent account mismatch');
-          const localRole = localSession.role === 'owner' ? 'super_admin' : localSession.role;
-          if (membership.role !== localRole) {
-            throw new Error('The selected role does not match the authenticated Independent staff session.');
-          }
           if (membership.schoolId) {
             const school = await db.schools.get(membership.schoolId);
             if (!school || school.accountId !== accountId) throw new Error('The selected Independent school was not found in this local database');
@@ -1678,7 +1692,8 @@ function RolePortalShellContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryIdentity, entryRetry, authenticated, sessionVerified,
       membershipRestored, canAccess, accountRestoring, accountLoading,
-      databaseContext.ready, switchingMembershipId, startupDeadline, accountOffline, allMemberships]);
+      databaseContext.ready, switchingMembershipId, startupDeadline, accountOffline, allMemberships,
+      independentWorkspace, independentIdentity?.session.id]);
 
   const firstDownloadReady = Boolean(entryIdentity &&
     entryState.key === entryIdentity && entryState.state === "ready");

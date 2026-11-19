@@ -5,6 +5,7 @@
 import { apiRequest } from '../platformApi';
 import { verifyOfflineLicense, type OfflineLicenseClaims, type OfflineLicenseEnvelope } from './offlineLicense';
 const KEY = 'eleeveon_independent_browser_license_v1';
+const REGISTRY_KEY = 'eleeveon_independent_browser_licenses_v2';
 const INSTALL_KEY = 'eleeveon_independent_installation_id_v1';
 export type BrowserLicenseRecord = { installationId:string; accountId:string; envelope:OfflineLicenseEnvelope };
 function pinnedKeys(): Record<string,string> {
@@ -20,17 +21,58 @@ export function browserInstallationId():string {
   if(!/^[0-9a-f-]{36}$/i.test(id))throw new Error('Invalid browser installation identity');
   return id;
 }
-export async function readVerifiedBrowserLicense():Promise<{claims:OfflineLicenseClaims;record:BrowserLicenseRecord}|null>{
-  if(typeof window==='undefined')return null;
-  const raw=localStorage.getItem(KEY);
-  if(!raw)return null;
-  let record:BrowserLicenseRecord;
-  try{record=JSON.parse(raw);}catch{throw new Error('Stored licence is damaged');}
+export type VerifiedBrowserLicense = {claims:OfflineLicenseClaims;record:BrowserLicenseRecord;selector:string};
+function licenseSelector(record:BrowserLicenseRecord):string {
+ const payload=JSON.parse(record.envelope.payload);
+ const id=String(payload.licenseId || payload.id || '');
+ if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id))throw new Error('Certificate has no valid licence identifier');
+ return id;
+}
+function registry():BrowserLicenseRecord[] {
+ const raw=localStorage.getItem(REGISTRY_KEY);
+ if(!raw)return [];
+ const data=JSON.parse(raw);
+ if(!Array.isArray(data))throw new Error('Installed licence registry is damaged');
+ return data;
+}
+export function selectedLicenseId():string|null {
+ if(typeof window==='undefined')return null;
+ const id=new URLSearchParams(window.location.search).get('license');
+ if(!id)return null;
+ if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id))throw new Error('Invalid licence selection');
+ return id;
+}
+export function independentWorkspaceUrl(selector?:string|null):string {
+ return selector?`/independent/workspace?license=${encodeURIComponent(selector)}`:'/independent/workspace';
+}
+export async function listVerifiedBrowserLicenses():Promise<VerifiedBrowserLicense[]> {
+ if(typeof window==='undefined')return [];
+ const records:BrowserLicenseRecord[]=[];
+ const legacy=localStorage.getItem(KEY);
+ if(legacy){try{records.push(JSON.parse(legacy));}catch{throw new Error('Legacy licence record is damaged');}}
+ records.push(...registry());
+ const verified:VerifiedBrowserLicense[]=[];
+ const seen=new Set<string>();
+ for(const record of records){
   if(record.installationId!==browserInstallationId())throw new Error('Licence belongs to another browser installation');
   const edition=JSON.parse(record.envelope.payload)?.edition;
-  if(edition!=='independent_essentials' && edition!=='independent_multi_device')throw new Error('Unsupported Independent edition');
+  if(edition!=='independent_essentials'&&edition!=='independent_multi_device')throw new Error('Unsupported Independent edition');
   const claims=await verifyOfflineLicense({envelope:record.envelope,publicKeys:pinnedKeys(),expectedAccountId:record.accountId,expectedInstallationId:record.installationId,expectedEdition:edition,appMajorVersion:1});
-  return {claims,record};
+  const selector=licenseSelector(record);
+  if(seen.has(selector))continue;
+  seen.add(selector);verified.push({claims,record,selector});
+ }
+ return verified;
+}
+export async function readVerifiedBrowserLicense():Promise<{claims:OfflineLicenseClaims;record:BrowserLicenseRecord}|null>{
+ const selected=selectedLicenseId();
+ const all=await listVerifiedBrowserLicenses();
+ if(selected){const found=all.find(x=>x.selector===selected);if(!found)throw new Error('Selected licence is not installed or is not verified');return found;}
+ // Preserve the existing installation and database for legacy users.
+ const legacy=typeof window!=='undefined'&&localStorage.getItem(KEY);
+ if(!legacy)return null;
+ const record=JSON.parse(legacy) as BrowserLicenseRecord;
+ return all.find(x=>x.selector===licenseSelector(record))||null;
 }
 export async function activateBrowserLicense(args:{licenseKey:string;licenseId:string;accountId:string}):Promise<OfflineLicenseClaims>{
   if(typeof navigator!=='undefined' && !navigator.onLine)throw new Error('Internet required for first activation');
@@ -44,6 +86,13 @@ export async function activateBrowserLicense(args:{licenseKey:string;licenseId:s
   const edition=JSON.parse(envelope.payload)?.edition;
   if(edition!=='independent_essentials'&&edition!=='independent_multi_device')throw new Error('Invalid Independent edition');
   const claims=await verifyOfflineLicense({envelope,publicKeys:pinnedKeys(),expectedAccountId:record.accountId,expectedInstallationId:installationId,expectedEdition:edition,appMajorVersion:1});
-  localStorage.setItem(KEY,JSON.stringify(record));
+  const existing=registry();
+  const selector=licenseSelector(record);
+  const legacyRaw=localStorage.getItem(KEY);
+  if(!legacyRaw){localStorage.setItem(KEY,JSON.stringify(record));}
+  else {const legacyRecord=JSON.parse(legacyRaw) as BrowserLicenseRecord;
+    if(licenseSelector(legacyRecord)===selector) localStorage.setItem(KEY,JSON.stringify(record));
+    else localStorage.setItem(REGISTRY_KEY,JSON.stringify([...existing.filter(x=>licenseSelector(x)!==selector),record]));
+  }
   return claims;
 }

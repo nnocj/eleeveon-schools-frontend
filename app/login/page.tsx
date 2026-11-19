@@ -24,7 +24,7 @@ import {
   type WorkspaceBootstrapProgress,
 } from "../lib/sync/workspaceBootstrap";
 import { useRouter } from "next/navigation";
-import { readVerifiedBrowserLicense } from "../lib/independent/browserLicense";
+import { readVerifiedBrowserLicense, listVerifiedBrowserLicenses, independentWorkspaceUrl } from "../lib/independent/browserLicense";
 
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
 import { setAccountId } from "../lib/sync/syncConfig";
@@ -302,32 +302,28 @@ function openPath(router: ReturnType<typeof useRouter>, path: string) {
 
 export default function LoginPage() {
   const router = useRouter();
+  const [loginPath, setLoginPath] = useState<"choose" | "cloud" | "independent">("choose");
+  const [installedLicenses, setInstalledLicenses] = useState<Array<{accountId:string; edition:string; licenseId:string; selector:string}>>([]);
+  const [licenseCheckError, setLicenseCheckError] = useState("");
   const [independentCheck, setIndependentCheck] = useState(true);
   useEffect(() => {
-    let mounted = true;
-    // Cloud account services remain explicitly reachable with ?cloud=1.
-    if (new URLSearchParams(window.location.search).get("cloud") === "1") {
-      setIndependentCheck(false);
-      return;
+    let alive = true;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("cloud") === "1" || params.has("independentPlanId")) {
+      setLoginPath("cloud"); setIndependentCheck(false); return;
     }
-    void readVerifiedBrowserLicense().then(result => {
-      if (!mounted) return;
-      if (result) window.location.replace("/independent/workspace");
-      else setIndependentCheck(false);
+    void listVerifiedBrowserLicenses().then(results => {
+      if (!alive) return;
+      setInstalledLicenses(results.map(result => ({
+        accountId: result.claims.accountId,
+        edition: String(result.claims.edition || "Independent"),
+        licenseId: String((result.claims as any).licenseId || "Installed license"), selector: result.selector
+      })));
     }).catch(error => {
-      // Do not silently fall through to Cloud if an installed certificate
-      // exists but fails validation.
-      if (!mounted) return;
-      if (localStorage.getItem("eleeveon_independent_browser_license_v1")) {
-        window.location.replace("/independent/workspace");
-      } else {
-        console.warn("Independent licence check unavailable:", error);
-        setIndependentCheck(false);
-      }
-    });
-    return () => { mounted = false; };
+      if (alive) setLicenseCheckError(error instanceof Error ? error.message : "License verification failed");
+    }).finally(() => { if (alive) setIndependentCheck(false); });
+    return () => { alive = false; };
   }, []);
-
 
   const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
@@ -494,11 +490,15 @@ export default function LoginPage() {
           );
         } catch (error: any) {
           const reason = String(error?.message || "Failed to prepare this workspace.");
-          setBootstrapError(
-            reason.includes("platform_only")
-              ? "This account uses an Independent package (platform_only). School records cannot be downloaded from Cloud. Open the licensed installation at /independent/workspace and sign in with a locally provisioned staff account. If this browser has no verified Independent license, ask the owner to activate it first."
-              : reason,
-          );
+          if (false && /platform_only/i.test(reason)) {
+            // Cloud credentials identify the account, but never authorize local school records.
+            // The Independent route performs license verification and local staff sign-in.
+            setBootstrapProgress(null);
+            setPendingMembership(null);
+            openPath(router, "/independent/workspace");
+            return;
+          }
+          setBootstrapError(reason);
           setLoading(false);
         }
 
@@ -563,14 +563,42 @@ export default function LoginPage() {
           ),
         );
       } catch (error: any) {
-        setBootstrapError(
-          error?.message ||
-            "Failed to prepare this workspace.",
-        );
+        const reason = String(error?.message || "Failed to prepare this workspace.");
+        if (false && /platform_only/i.test(reason)) {
+          setBootstrapProgress(null);
+          setPendingMembership(null);
+          openPath(router, "/independent/workspace");
+          return;
+        }
+        setBootstrapError(reason);
       }
     };
 
-  if (independentCheck) return <main className="login-page"><p>Checking installed Independent workspace…</p></main>;
+  if (independentCheck) return <main className="login-page"><p>Checking installed Independent licenses…</p></main>;
+
+  if (loginPath === "choose" || loginPath === "independent") return (
+    <main className="min-h-dvh grid place-items-center p-4 bg-slate-50 text-slate-900">
+      <section className="w-full max-w-lg rounded-2xl border bg-white p-6 shadow-sm grid gap-4">
+        <header><h1 className="text-2xl font-bold">Eleeveon Schools</h1><p className="text-sm text-slate-600">Choose how to access your workspace.</p></header>
+        <div className="grid grid-cols-2 gap-3">
+          <button type="button" className={`rounded-xl border p-4 text-left ${loginPath === "cloud" ? "border-blue-600" : ""}`} onClick={() => setLoginPath("cloud")}><strong>☁ Cloud Account</strong><p className="mt-1 text-xs">Online account sign-in</p></button>
+          <button type="button" className={`rounded-xl border p-4 text-left ${loginPath === "independent" ? "border-blue-600" : ""}`} onClick={() => setLoginPath("independent")}><strong>🔑 Independent License</strong><p className="mt-1 text-xs">Local licensed workspace</p></button>
+        </div>
+        {loginPath === "independent" && <div className="grid gap-3">
+          <h2 className="font-semibold">Installed licenses</h2>
+          {installedLicenses.length ? installedLicenses.map(license => <button key={license.selector} type="button" className="rounded-xl border p-4 text-left hover:border-blue-600" onClick={() => window.location.assign(independentWorkspaceUrl(license.selector))}>
+            <strong>{license.edition.replaceAll("_", " ")}</strong>
+            <p className="text-xs text-slate-600">Account: {license.accountId}</p>
+            <p className="text-xs text-slate-600">{license.licenseId} · Continue to local staff sign-in</p>
+          </button>) : <p className="text-sm text-slate-600">No verified Independent license is installed in this browser profile.</p>}
+          {licenseCheckError && <p role="alert" className="text-sm text-red-700">Stored license could not be verified: {licenseCheckError}. Open the Independent workspace for recovery. No local data will be deleted.</p>}
+          <button type="button" className="rounded-lg bg-blue-700 p-3 font-semibold text-white" onClick={() => window.location.assign("/independent/workspace?activate=1")}>Activate another Independent license</button>
+          <p className="text-xs text-slate-600">Activation requires the commercial account owner's credentials and the paid license ID/key. Staff then sign in locally. Each new license opens a separate local database and staff credential store.</p>
+        </div>}
+        {loginPath === "choose" && <p className="text-sm text-slate-600">Cloud sign-in remains available even when an Independent license is installed. Independent login never calls Cloud workspace bootstrap.</p>}
+      </section>
+    </main>
+  );
 
   return (
     <main className="login-page">

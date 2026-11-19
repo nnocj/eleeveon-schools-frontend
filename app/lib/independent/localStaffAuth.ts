@@ -8,7 +8,7 @@ export type LocalGrant = { role: 'branch_admin' | 'teacher'; schoolId: string; b
 export type LocalStaffPublic = { id: string; accountId: string; displayName: string; role: LocalRole; active: boolean; schoolId?: string; branchId?: string; grants?: LocalGrant[] };
 type StaffRecord = LocalStaffPublic & { salt: number[]; verifier: number[]; iterations: number; failed: number; lockedUntil: number; createdAt: number };
 export type LocalSession = { readonly id: string; readonly accountId: string; readonly displayName: string; readonly role: LocalRole; readonly authenticatedAt: number; readonly expiresAt: number; readonly schoolId?: string; readonly branchId?: string; readonly grants?: LocalGrant[] };
-const DB_NAME = 'eleeveon-independent-auth-v1';
+const DB_NAME = (() => { if(typeof window==='undefined')return 'eleeveon-independent-auth-v1'; const id=new URLSearchParams(window.location.search).get('license'); if(!id)return 'eleeveon-independent-auth-v1'; try{const old=localStorage.getItem('eleeveon_independent_browser_license_v1');if(old){const payload=JSON.parse(JSON.parse(old).envelope.payload);if(String(payload.licenseId||payload.id)===id)return 'eleeveon-independent-auth-v1';}}catch{} if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id))throw new Error('Invalid Independent licence selector'); return `eleeveon-independent-auth-v1_${id}`; })();
 const STORE = 'staff';
 const ITERATIONS = 310_000;
 // No arbitrary inactivity timeout: session remains valid until explicit lock/logout.

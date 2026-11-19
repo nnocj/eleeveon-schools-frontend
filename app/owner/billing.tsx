@@ -253,6 +253,29 @@ export default function BillingPage() {
   const [publicPlans, setPublicPlans] = useState<CommercialPlan[]>([]);
   const [catalogError, setCatalogError] = useState("");
   const [studentCount, setStudentCount] = useState(200);
+  const [licenseRecoveryBusy, setLicenseRecoveryBusy] = useState(false);
+  const [recoveredLicense, setRecoveredLicense] = useState<{licenseId: string; licenseKey: string} | null>(null);
+  const [licenseRecoveryError, setLicenseRecoveryError] = useState("");
+
+  async function recoverIndependentLicense() {
+    if (licenseRecoveryBusy) return;
+    setRecoveredLicense(null);
+    setLicenseRecoveryError("");
+    if (!window.confirm("Reveal your Independent licence key on this screen? Make sure nobody else can see your display.")) return;
+    setLicenseRecoveryBusy(true);
+    try {
+      // The backend authenticates the owner and restricts the purchase to their account.
+      const purchase = await apiRequest<{licenseId?: string | null; licenseKey?: string | null}>("/licenses/independent-checkout/latest");
+      if (!purchase?.licenseId || !purchase?.licenseKey) {
+        throw new Error("No recoverable paid Independent licence key was found for this account.");
+      }
+      setRecoveredLicense({licenseId: purchase.licenseId, licenseKey: purchase.licenseKey});
+    } catch (error) {
+      setLicenseRecoveryError(error instanceof Error ? error.message : "Licence recovery failed.");
+    } finally {
+      setLicenseRecoveryBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (accountLoading) return;
@@ -425,6 +448,31 @@ export default function BillingPage() {
           <p>{notice}</p>
         </section>
       ) : null}
+
+      <section className="ba-list" aria-label="Independent licence key recovery" style={{marginBottom: 12}}>
+        <article className="billing-row">
+          <span className="billing-row-icon">🔑</span>
+          <span className="billing-row-main">
+            <strong>Independent licence key</strong>
+            <small>Recover an existing paid licence. No new checkout or payment.</small>
+            <em>Only reveal this credential on a private device.</em>
+          </span>
+          <span className="billing-row-side">
+            <button type="button" className="billing-package-action" disabled={licenseRecoveryBusy} onClick={() => void recoverIndependentLicense()}>
+              {licenseRecoveryBusy ? "Checking…" : "Recover key"}
+            </button>
+          </span>
+        </article>
+        {licenseRecoveryError ? <p role="alert" style={{padding: 12}}>{licenseRecoveryError}</p> : null}
+        {recoveredLicense ? <div style={{padding: 12, overflowWrap: "anywhere"}}>
+          <p><strong>Licence ID:</strong> {recoveredLicense.licenseId}</p>
+          <p><strong>Licence key:</strong> <code>{recoveredLicense.licenseKey}</code></p>
+          <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8}}>
+            <button type="button" className="billing-package-action" onClick={() => void navigator.clipboard.writeText(recoveredLicense.licenseKey).catch(() => setLicenseRecoveryError("Copy failed. Select and copy the displayed key manually."))}>Copy key</button>
+            <button type="button" className="billing-package-action" onClick={() => setRecoveredLicense(null)}>Hide key</button>
+          </div>
+        </div> : null}
+      </section>
 
       {!effectiveDisplay?.independent && !effective.loading && !effective.error ? <TrialAccountSummary onExplorePackages={() => router.push("/owner/subscription")} /> : null}
       {effective.error ? <section className="ba-slim-notice"><p>Current licence could not be verified. The previous subscription record may be outdated. Reconnect and refresh.</p></section> : null}

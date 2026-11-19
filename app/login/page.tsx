@@ -581,7 +581,7 @@ export default function LoginPage() {
       <section className="w-full max-w-lg rounded-2xl border bg-white p-6 shadow-sm grid gap-4">
         <header><h1 className="text-2xl font-bold">Eleeveon Schools</h1><p className="text-sm text-slate-600">Choose how to access your workspace.</p></header>
         <div className="grid grid-cols-2 gap-3">
-          <button type="button" className={`rounded-xl border p-4 text-left ${loginPath === "cloud" ? "border-blue-600" : ""}`} onClick={() => setLoginPath("cloud")}><strong>☁ Cloud Account</strong><p className="mt-1 text-xs">Online account sign-in</p></button>
+          <button type="button" className={`rounded-xl border p-4 text-left ${loginPath === "choose" ? "border-slate-300" : ""}`} onClick={() => setLoginPath("cloud")}><strong>☁ Cloud Account</strong><p className="mt-1 text-xs">Online account sign-in</p></button>
           <button type="button" className={`rounded-xl border p-4 text-left ${loginPath === "independent" ? "border-blue-600" : ""}`} onClick={() => setLoginPath("independent")}><strong>🔑 Independent License</strong><p className="mt-1 text-xs">Local licensed workspace</p></button>
         </div>
         {loginPath === "independent" && <div className="grid gap-3">

@@ -377,6 +377,22 @@ export default function LoginPage() {
       const memberships = collectMemberships(res);
       const role = normalizeRole(res.user.role);
 
+      // Online Cloud authentication is not authorization to read an Independent
+      // school's local database. Only hand off to an already verified local
+      // installation for the exact same account, where local staff must still
+      // authenticate and have the proper school/branch grant.
+      // ?cloud=1 is an explicit request for Cloud account services.
+      const explicitCloud = new URLSearchParams(window.location.search).get("cloud") === "1";
+      if (!explicitCloud) {
+        const installed = await readVerifiedBrowserLicense();
+        if (installed && installed.claims.accountId === res.user.accountId) {
+          // Do not persist the Cloud token or memberships into Independent's
+          // browser context. The Independent runtime will verify local identity.
+          openPath(router, "/independent/workspace");
+          return;
+        }
+      }
+
       saveAuthToken(token);
       setAccountId(res.user.accountId);
       saveLoginContext(res, memberships);
@@ -477,10 +493,13 @@ export default function LoginPage() {
             ),
           );
         } catch (error: any) {
+          const reason = String(error?.message || "Failed to prepare this workspace.");
           setBootstrapError(
-            error?.message ||
-              "Failed to prepare this workspace.",
+            reason.includes("platform_only")
+              ? "This account uses an Independent package (platform_only). School records cannot be downloaded from Cloud. Open the licensed installation at /independent/workspace and sign in with a locally provisioned staff account. If this browser has no verified Independent license, ask the owner to activate it first."
+              : reason,
           );
+          setLoading(false);
         }
 
         return;

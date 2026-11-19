@@ -781,8 +781,9 @@ async function cacheAuthUserLocally(args: { user: AppUser; form: FormState; acco
   const id = userIdOf(args.user) || makeLocalAuthId("user");
   const timestamp = dateishNowForAuthTable(table);
 
+  const { password: _secretPassword, temporaryPassword: _secretTemporaryPassword, ...safeUser } = args.user;
   const payload: Partial<AppUser> = {
-    ...args.user,
+    ...safeUser,
     id,
     accountId: args.accountId,
     schoolId: args.form.schoolId,
@@ -795,8 +796,6 @@ async function cacheAuthUserLocally(args: { user: AppUser; form: FormState; acco
     role: args.form.role,
     active: args.form.active,
     status: args.form.active ? "active" : "inactive",
-    temporaryPassword: args.form.temporaryPassword.trim(),
-    password: args.form.temporaryPassword.trim(),
     mustChangePassword: true,
     isDeleted: false,
     updatedAt: timestamp as any,
@@ -1064,7 +1063,7 @@ function OwnerUsers() {
             schoolId: membership.schoolId ? String(membership.schoolId) : "",
             branchId: membership.branchId ? String(membership.branchId) : "",
             active: membership.active !== false && membership.status !== "inactive" && user.active !== false && user.status !== "inactive",
-            temporaryPassword: user.temporaryPassword || tempPasswordFromEmail(membership.email || user.email || ""),
+            temporaryPassword: "",
           };
 
           await cacheAuthUserLocally({ user, form: cacheForm, accountId: selectedAccountId });
@@ -1270,7 +1269,7 @@ function OwnerUsers() {
       schoolId: candidate.membership?.schoolId ? String(candidate.membership.schoolId) : "",
       branchId: candidate.membership?.branchId ? String(candidate.membership.branchId) : "",
       active: !candidate.inactive,
-      temporaryPassword: candidate.user?.temporaryPassword || tempPasswordFromEmail(candidate.email),
+      temporaryPassword: "",
     });
     setMessage("");
     setDrawerOpen(true);
@@ -1286,7 +1285,7 @@ function OwnerUsers() {
     if (ROLES.find((role) => role.value === form.role)?.branchRequired && !form.branchId) {
       return `${roleLabel(form.role)} role must be assigned to a branch.`;
     }
-    if (!form.userId && !form.temporaryPassword.trim()) return "Temporary password is required when creating a new identity.";
+    if (!form.userId && form.temporaryPassword.trim().length < 12) return "Temporary password is required when creating a new identity.";
     return "";
   };
 
@@ -1373,7 +1372,7 @@ function OwnerUsers() {
         schoolId: String(candidate.membership?.schoolId || candidate.school?.id || ""),
         branchId: String(candidate.membership?.branchId || candidate.branch?.id || ""),
         active: nextActive,
-        temporaryPassword: candidate.user?.temporaryPassword || tempPasswordFromEmail(candidate.email),
+        temporaryPassword: "",
       };
 
       if (candidate.user) {

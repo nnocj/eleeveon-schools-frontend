@@ -1,41 +1,37 @@
 "use client";
-import React,{useEffect,useState} from 'react';
+import React,{useCallback,useEffect,useMemo,useState} from 'react';
 import {db} from '../../lib/db/db';
 import {createLocalStaff,listLocalStaff,setLocalStaffActive,addLocalStaffGrant,currentLocalSession,type LocalStaffPublic} from '../../lib/independent/localStaffAuth';
+
+/** Owner-only Independent users, backed by local password verifiers and grants.
+ * Never calls Cloud membership endpoints or stores raw passwords in Dexie. */
 export default function IndependentStaffManager({accountId}:{accountId:string}){
  const [schools,setSchools]=useState<any[]>([]),[branches,setBranches]=useState<any[]>([]),[staff,setStaff]=useState<LocalStaffPublic[]>([]);
- const [grantStaffId,setGrantStaffId]=useState('');
- const [grantRole,setGrantRole]=useState<'branch_admin'|'teacher'>('branch_admin');
  const [name,setName]=useState(''),[password,setPassword]=useState(''),[role,setRole]=useState<'branch_admin'|'teacher'>('branch_admin');
- const [schoolId,setSchoolId]=useState(''),[branchId,setBranchId]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
- async function refresh(){const [ss,bb,uu]=await Promise.all([db.schools.toArray(),db.branches.toArray(),listLocalStaff(accountId)]);setSchools(ss.filter((s:any)=>s.accountId===accountId&&!s.isDeleted));setBranches(bb.filter((b:any)=>b.accountId===accountId&&!b.isDeleted));setStaff(uu);}
- useEffect(()=>{void refresh().catch(e=>setError(String(e)));},[accountId]);
- async function add(e:React.FormEvent){e.preventDefault();setError('');setBusy(true);try{
-  const school=schools.find(s=>String(s.id)===schoolId);const branch=branches.find(b=>String(b.id)===branchId&&String(b.schoolId)===schoolId);
-  if(!school||!branch)throw new Error('Choose a valid school and its branch');
-  await createLocalStaff({accountId,displayName:name,password,role,schoolId,branchId});setName('');setPassword('');await refresh();
- }catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
- async function assign(e:React.FormEvent){e.preventDefault();setError('');setBusy(true);try{
-  const person=staff.find(u=>u.id===grantStaffId&&u.active);
-  const branch=branches.find(b=>String(b.id)===branchId&&String(b.schoolId)===schoolId);
-  if(!person)throw new Error('Choose an enabled existing staff identity');
-  if(!branch)throw new Error('Choose a valid school and branch');
-  if(grantRole==='teacher')throw new Error('Teacher access requires a linked Teacher profile. Use Create local staff for now; do not grant unlinked teacher access.');
-  await addLocalStaffGrant({accountId,staffId:person.id,grant:{role:grantRole,schoolId,branchId}});
-  window.dispatchEvent(new Event('independent-grants-changed'));
-  setGrantStaffId('');await refresh();
- }catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
- return <section className="rounded-xl border p-4"><h2 className="text-lg font-semibold">Independent staff access</h2><p className="my-2 text-sm">Local credentials for this installation only. Staff must use this device; this does not provision other devices.</p>
- <form onSubmit={add} className="grid gap-2 sm:grid-cols-2"><input className="rounded border p-2" placeholder="Full name" value={name} onChange={e=>setName(e.target.value)} required/><select className="rounded border p-2" value={role} onChange={e=>setRole(e.target.value as any)}><option value="branch_admin">Branch Admin</option><option value="teacher">Teacher</option></select>
- <select className="rounded border p-2" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setBranchId('');}} required><option value="">Choose school</option>{schools.map(s=><option key={s.id} value={String(s.id)}>{s.name}</option>)}</select>
- <select className="rounded border p-2" value={branchId} onChange={e=>setBranchId(e.target.value)} required><option value="">Choose branch</option>{branches.filter(b=>String(b.schoolId)===schoolId).map(b=><option key={b.id} value={String(b.id)}>{b.name}</option>)}</select>
- <input className="rounded border p-2" type="password" minLength={12} placeholder="Password (12+ characters)" value={password} onChange={e=>setPassword(e.target.value)} required/><button className="rounded bg-blue-700 p-2 text-white" disabled={busy}>{busy?'Saving…':'Create local staff'}</button></form>
- <form onSubmit={assign} className="mt-5 grid gap-2 rounded-lg border p-3 sm:grid-cols-2"><h3 className="font-semibold sm:col-span-2">Assign a role to an existing identity</h3>
- <select className="rounded border p-2" value={grantStaffId} onChange={e=>setGrantStaffId(e.target.value)} required><option value="">Select existing staff (including Owner)</option>{staff.filter(u=>u.active).map(u=><option key={u.id} value={u.id}>{u.displayName} — {u.role}</option>)}</select>
- <select className="rounded border p-2" value={grantRole} onChange={e=>setGrantRole(e.target.value as 'branch_admin'|'teacher')}><option value="branch_admin">Branch Admin</option><option value="teacher">Teacher (requires linked profile)</option></select>
- <select className="rounded border p-2" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setBranchId('');}} required><option value="">Choose school</option>{schools.map(s=><option key={s.id} value={String(s.id)}>{s.name}</option>)}</select>
- <select className="rounded border p-2" value={branchId} onChange={e=>setBranchId(e.target.value)} required><option value="">Choose branch</option>{branches.filter(b=>String(b.schoolId)===schoolId).map(b=><option key={b.id} value={String(b.id)}>{b.name}</option>)}</select>
- <button type="submit" disabled={busy} className="rounded bg-blue-700 p-2 text-white sm:col-span-2">{busy?'Saving…':'Assign existing staff role'}</button></form>
- {error&&<p role="alert" className="mt-2 text-red-600">{error}</p>}
- <div className="mt-4 grid gap-2">{staff.map(u=><div key={u.id} className="flex flex-wrap items-center justify-between gap-2 border-b py-2"><span>{u.displayName} · {u.role} · {schools.find(s=>String(s.id)===u.schoolId)?.name||'School'} / {branches.find(b=>String(b.id)===u.branchId)?.name||'Branch'} · {u.active?'Enabled':'Disabled'}</span><button disabled={u.role==='owner'} className="rounded border px-3 py-1" onClick={()=>void setLocalStaffActive(accountId,u.id,!u.active).then(refresh).catch(e=>setError(String(e)))}>{u.active?'Disable':'Enable'}</button></div>)}</div></section>;
+ const [schoolId,setSchoolId]=useState(''),[branchId,setBranchId]=useState(''),[query,setQuery]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[creating,setCreating]=useState(false);
+ const [grantStaff,setGrantStaff]=useState(''),[grantSchool,setGrantSchool]=useState(''),[grantBranch,setGrantBranch]=useState('');
+ const authorized=()=>{const s=currentLocalSession();if(!s||s.role!=='owner'||s.accountId!==accountId)throw new Error('Independent Owner authentication is required');};
+ const refresh=useCallback(async()=>{authorized();const [ss,bb,uu]=await Promise.all([db.schools.toArray(),db.branches.toArray(),listLocalStaff(accountId)]);setSchools(ss.filter((s:any)=>String(s.accountId)===accountId&&!s.isDeleted));setBranches(bb.filter((b:any)=>String(b.accountId)===accountId&&!b.isDeleted));setStaff(uu);},[accountId]);
+ useEffect(()=>{void refresh().catch(e=>setError(String(e)));},[refresh]);
+ const filtered=useMemo(()=>staff.filter(s=>s.role!=='owner'&&`${s.displayName} ${s.role} ${s.schoolId} ${s.branchId}`.toLowerCase().includes(query.toLowerCase())),[staff,query]);
+ async function run(task:()=>Promise<void>){setError('');setNotice('');setBusy(true);try{authorized();await task();await refresh();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
+ const schoolBranches=(id:string)=>branches.filter(b=>String(b.schoolId)===id);
+ const schoolName=(id?:string)=>schools.find(s=>String(s.id)===String(id))?.name||'Unknown school';
+ const branchName=(id?:string)=>branches.find(b=>String(b.id)===String(id))?.name||'Unknown branch';
+ return <main className="mx-auto max-w-5xl p-4 sm:p-6">
+  <header className="mb-5 flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-bold">Users & Roles</h1><p className="mt-1 text-sm opacity-75">Independent installation · Local staff access</p></div><button type="button" className="rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white" onClick={()=>setCreating(v=>!v)}>{creating?'Close':'＋ Add user'}</button></header>
+  <p className="mb-4 text-sm opacity-75">Users are provisioned on this installation only. Local passwords work offline. Cloud email/password credentials are not automatically valid here. Independent currently supports Branch Admin and Teacher roles.</p>
+  {error&&<p role="alert" className="mb-3 rounded border border-red-400 p-3 text-red-700">{error}</p>}{notice&&<p role="status" className="mb-3 rounded border p-3">{notice}</p>}
+  {creating&&<form className="mb-5 grid gap-3 rounded-xl border p-4 sm:grid-cols-2" onSubmit={e=>{e.preventDefault();void run(async()=>{if(!name.trim())throw new Error('Enter the staff member’s name');if(password.length<12)throw new Error('Password must contain at least 12 characters');const school=schools.find(s=>String(s.id)===schoolId),branch=branches.find(b=>String(b.id)===branchId&&String(b.schoolId)===schoolId);if(!school||!branch)throw new Error('Choose a valid school and branch');await createLocalStaff({accountId,displayName:name.trim(),password,role,schoolId,branchId});setName('');setPassword('');setCreating(false);setNotice('Local staff member created. They can sign in on this installation.');});}}>
+   <label className="grid gap-1 text-sm">Full name<input className="rounded border p-2" value={name} onChange={e=>setName(e.target.value)} required/></label>
+   <label className="grid gap-1 text-sm">Role<select className="rounded border p-2" value={role} onChange={e=>setRole(e.target.value as 'branch_admin'|'teacher')}><option value="branch_admin">Branch Admin</option><option value="teacher">Teacher</option></select></label>
+   <label className="grid gap-1 text-sm">School<select className="rounded border p-2" value={schoolId} onChange={e=>{setSchoolId(e.target.value);setBranchId('');}} required><option value="">Select school</option>{schools.map(s=><option key={s.id} value={String(s.id)}>{s.name}</option>)}</select></label>
+   <label className="grid gap-1 text-sm">Branch<select className="rounded border p-2" value={branchId} onChange={e=>setBranchId(e.target.value)} required><option value="">Select branch</option>{schoolBranches(schoolId).map(b=><option key={b.id} value={String(b.id)}>{b.name}</option>)}</select></label>
+   <label className="grid gap-1 text-sm sm:col-span-2">Local password (minimum 12 characters)<input className="rounded border p-2" type="password" autoComplete="new-password" minLength={12} value={password} onChange={e=>setPassword(e.target.value)} required/></label>
+   <button className="rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white sm:col-span-2" disabled={busy}>{busy?'Saving…':'Create local user'}</button>
+  </form>}
+  <div className="mb-3 flex items-center gap-2"><input className="w-full rounded-lg border p-3" placeholder="Search users…" aria-label="Search users" value={query} onChange={e=>setQuery(e.target.value)}/><button type="button" className="rounded-lg border px-3 py-3" onClick={()=>void refresh().catch(e=>setError(String(e)))}>Refresh</button></div>
+  <section className="grid gap-3">{filtered.map(u=><article key={u.id} className="rounded-xl border p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><strong>{u.displayName}</strong><p className="text-sm opacity-75">{u.role==='branch_admin'?'Branch Admin':'Teacher'} · {schoolName(u.schoolId)} / {branchName(u.branchId)}</p><p className="mt-1 text-xs opacity-70">{u.active?'Active':'Inactive'} · {(u.grants||[]).length||1} workspace assignment(s)</p></div><div className="flex gap-2"><button type="button" className="rounded-lg border px-3 py-2" disabled={busy} onClick={()=>{if(!window.confirm(`${u.active?'Deactivate':'Activate'} ${u.displayName}?`))return;void run(async()=>{await setLocalStaffActive(accountId,u.id,!u.active);setNotice('Local access updated.');});}}>{u.active?'Deactivate':'Activate'}</button><button type="button" className="rounded-lg border px-3 py-2" disabled={busy||!u.active} onClick={()=>{setGrantStaff(u.id);setGrantSchool(u.schoolId||'');setGrantBranch(u.branchId||'');}}>Add branch</button></div></div></article>)}{!filtered.length&&<p className="rounded-xl border p-6 text-center opacity-70">No local staff match this search.</p>}</section>
+  {grantStaff&&<section className="mt-4 rounded-xl border p-4"><h2 className="mb-3 font-semibold">Assign another branch</h2><form className="grid gap-3 sm:grid-cols-2" onSubmit={e=>{e.preventDefault();void run(async()=>{const person=staff.find(s=>s.id===grantStaff);if(!person||!person.active||person.role==='owner')throw new Error('Select an active staff member');if(!schoolBranches(grantSchool).some(b=>String(b.id)===grantBranch))throw new Error('Select a valid branch');await addLocalStaffGrant({accountId,staffId:grantStaff,grant:{role:person.role,schoolId:grantSchool,branchId:grantBranch}});setGrantStaff('');setNotice('Additional branch access granted.');});}}><select className="rounded border p-2" value={grantSchool} onChange={e=>{setGrantSchool(e.target.value);setGrantBranch('');}} required><option value="">Select school</option>{schools.map(s=><option key={s.id} value={String(s.id)}>{s.name}</option>)}</select><select className="rounded border p-2" value={grantBranch} onChange={e=>setGrantBranch(e.target.value)} required><option value="">Select branch</option>{schoolBranches(grantSchool).map(b=><option key={b.id} value={String(b.id)}>{b.name}</option>)}</select><div className="flex gap-2 sm:col-span-2"><button className="rounded bg-blue-700 px-4 py-2 text-white" disabled={busy}>Save assignment</button><button type="button" className="rounded border px-4 py-2" onClick={()=>setGrantStaff('')}>Cancel</button></div></form></section>}
+ </main>;
 }

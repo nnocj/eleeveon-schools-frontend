@@ -129,6 +129,7 @@ import {
 } from "../../lib/sync/syncUtils";
 
 import { publishBranchSettingsSaved } from "../../lib/sync/syncEvents";
+import { isIndependentAdmissionAccount, previewIndependentAdmissionNumber } from "../../lib/students/independentAdmission";
 
 import {
   STUDENT_REPORT_TEMPLATE_REGISTRY,
@@ -2631,6 +2632,9 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   const [sectionOpen, setSectionOpen] = useState<SettingsSection | null>(null);
   const [admissionDraft, setAdmissionDraft] = useState({ mode: "manual" as "manual" | "automatic" | "automatic_or_manual", prefix: "", separator: "-", nextSequence: 1, padding: 3, scope: "branch" as const });
   const [savingAdmission, setSavingAdmission] = useState(false);
+  const [independentAdmissionMode, setIndependentAdmissionMode] = useState(false);
+  const [independentAdmissionPreview, setIndependentAdmissionPreview] = useState<string | null>(null);
+  const [admissionPreviewLoading, setAdmissionPreviewLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const loadSequenceRef = useRef(0);
 
@@ -2654,17 +2658,55 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
       mode: cfg?.mode || "manual",
       prefix: cfg?.prefix || "",
       separator: cfg?.separator ?? "-",
-      // The browser must never reuse the old saved sequence as an allocation floor.
-      nextSequence: 1,
+      // Independent deployments preserve the locally allocated sequence.
+      nextSequence: Math.max(1, Math.floor(Number(cfg?.nextSequence) || 1)),
       padding: Math.min(12, Math.max(3, Number(cfg?.padding) || 3)),
       scope: "branch",
     });
   }, [settingsRow]);
 
-  // Do not estimate the authoritative number from browser data.
-  // Admission allocations belong to the server registry, not IndexedDB.
-  // The backend status is intentionally unavailable until an authenticated
-  // server read endpoint is wired into this module.
+  // Cloud remains server-authoritative; Independent reads its local registry.
+  useEffect(() => {
+    let cancelled = false;
+    setIndependentAdmissionMode(false);
+    setIndependentAdmissionPreview(null);
+    if (!selectedAccountId || !selectedSchoolId || !selectedBranchId) return;
+    (async () => {
+      try {
+        const independent = await isIndependentAdmissionAccount(String(selectedAccountId));
+        if (!cancelled) setIndependentAdmissionMode(independent);
+      } catch (error) {
+        console.error("Could not resolve admission deployment policy", error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedAccountId, selectedSchoolId, selectedBranchId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!independentAdmissionMode || !selectedAccountId || !selectedSchoolId || !selectedBranchId) {
+      setIndependentAdmissionPreview(null);
+      return;
+    }
+    setAdmissionPreviewLoading(true);
+    (async () => {
+      try {
+        const result = await previewIndependentAdmissionNumber({
+          accountId: String(selectedAccountId), schoolId: String(selectedSchoolId),
+          branchId: String(selectedBranchId), configuration: admissionDraft,
+        });
+        if (!cancelled) setIndependentAdmissionPreview(result);
+      } catch (error) {
+        console.error("Could not preview local admission number", error);
+        if (!cancelled) setIndependentAdmissionPreview(null);
+      } finally {
+        if (!cancelled) setAdmissionPreviewLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [independentAdmissionMode, selectedAccountId, selectedSchoolId, selectedBranchId,
+    admissionDraft.mode, admissionDraft.prefix, admissionDraft.separator,
+    admissionDraft.padding, admissionDraft.nextSequence, dataRevision, sectionOpen]);
 
   const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>(
     [],
@@ -4057,7 +4099,8 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
             const saved = (latestSavedRow as any)?.admissionNumbers ??
               (settingsRow as any)?.admissionNumbers;
             return saved && typeof saved === "object"
-              ? { ...saved, padding: Math.min(12, Math.max(3, Number(saved.padding) || 3)), nextSequence: 1 }
+              ? { ...saved, padding: Math.min(12, Math.max(3, Number(saved.padding) || 3)),
+                  nextSequence: independentAdmissionMode ? Math.max(1, Number(saved.nextSequence) || 1) : 1 }
               : saved;
           })(),
           identityIssuancePolicyCache: (latestSavedRow as any)?.identityIssuancePolicyCache ??
@@ -4709,7 +4752,9 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         // StudentAdmissionIdentity determine the next free number. Keeping 82
         // here would force Math.max(sequence.nextSequence, config.nextSequence)
         // to skip valid numbers even after a registry repair.
-        nextSequence: 1,
+        nextSequence: independentAdmissionMode
+          ? Math.max(1, Math.floor(Number(previous?.nextSequence) || 1))
+          : 1,
       };
       await updateLocal("schoolBranchSettings", existing.id, { admissionNumbers: next } as any);
       const verified = await db.schoolBranchSettings.get(existing.id);
@@ -5208,7 +5253,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         icon: "#",
         title: "Admission Numbers",
         subtitle: admissionDraft.mode === "manual" ? "Manual entry" : "Automatic numbering",
-        detail: `${admissionDraft.prefix || "No prefix"}${admissionDraft.separator}${"0".repeat(Math.max(3, Math.min(12, admissionDraft.padding)))} · Next number assigned by server`,
+        detail: `${admissionDraft.prefix || "No prefix"}${admissionDraft.separator}${"0".repeat(Math.max(3, Math.min(12, admissionDraft.padding)))} · ${independentAdmissionMode ? (admissionDraft.mode === "manual" ? "Manual numbering · Independent" : admissionPreviewLoading ? "Checking local sequence…" : `Next: ${independentAdmissionPreview || "Unavailable"} · Independent`) : "Next number assigned by server"}`,
         tone: "blue",
       },
       {
@@ -5570,10 +5615,10 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
                 <Field label="Separator"><select value={admissionDraft.separator} onChange={e => setAdmissionDraft(p => ({...p, separator: e.target.value}))}><option value="-">Hyphen (-)</option><option value="/">Slash (/)</option><option value="">None</option></select></Field>
                 <Field label="Minimum number of digits"><input type="number" min={3} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(3,Math.min(12,Number(e.target.value)||3))}))}/></Field>
                 <div className="admission-sequence-note" role="status">
-                  <strong>Next number: controlled by backend registry</strong>
-                  <span>This screen saves the prefix, mode, separator and minimum digits. The server assigns the next available number; the old local counter is not used.</span>
+                  <strong>{independentAdmissionMode ? (admissionDraft.mode === "manual" ? "Independent · Manual numbering" : `Independent · Next number: ${admissionPreviewLoading ? "Checking…" : independentAdmissionPreview || "Unavailable"}`) : "Cloud · Next number: controlled by backend registry"}</strong>
+                  <span>{independentAdmissionMode ? "Numbers are issued locally without a Cloud connection. The saved sequence and previously issued numbers are respected. Deleted records retain their numbers." : "The server assigns the next available number. The local sequence is not authoritative for Cloud deployments."}</span>
                 </div>
-                <p className="admission-sequence-caption">Existing student IDs are not changed. New allocations use the server registry.</p>
+                <p className="admission-sequence-caption">{independentAdmissionMode ? "Existing admission numbers are unchanged. The next local number is allocated when a student is saved." : "Existing student IDs are not changed. New allocations use the server registry."}</p>
             </div>
             <div className="ba-sheet-footer"><button type="button" onClick={() => setSectionOpen(null)}>Cancel</button><button type="button" className="primary" disabled={savingAdmission} onClick={() => void saveAdmissionNumbers()}>{savingAdmission ? "Saving..." : "Save"}</button></div>
           </section>

@@ -41,3 +41,18 @@ export async function createIndependentStudentWithAdmission(args: {
       admissionNumberProvisional: false, admissionNumberConfirmed: true } as Student);
   });
 }
+
+/** Read-only preview. The actual number is always re-evaluated in the create transaction. */
+export async function previewIndependentAdmissionNumber(args: {
+  accountId: string; schoolId: string; branchId: string;
+  configuration?: { mode: string; prefix: string; separator: string; padding: number; nextSequence: number; scope: "branch" };
+}): Promise<string | null> {
+  const cfg = args.configuration ?? await readAdmissionConfiguration(args.schoolId, args.branchId, args.accountId);
+  if (cfg.mode === "manual") return null;
+  const rows = await db.students.where("branchId").equals(args.branchId).toArray();
+  const occupied = new Set(rows.filter((s: any) => s.schoolId === args.schoolId &&
+    (!s.accountId || s.accountId === args.accountId)).map((s: any) => norm(s.admissionNumber)).filter(Boolean));
+  let sequence = Math.max(1, Math.floor(Number(cfg.nextSequence) || 1));
+  while (occupied.has(norm(formatAdmissionNumber(cfg, sequence)))) sequence++;
+  return formatAdmissionNumber(cfg, sequence);
+}

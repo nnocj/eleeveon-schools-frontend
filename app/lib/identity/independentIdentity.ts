@@ -60,7 +60,7 @@ export async function localIssueCard(t:IdentityTarget,replace=false,detail?:stri
  const now=Math.floor(Date.now()/1000), expires=new Date(now*1000);expires.setUTCMonth(expires.getUTCMonth()+Math.max(1,Math.min(120,Number(policy.expiryMonths)||12)));
  const cid=crypto.randomUUID();
  const resolvedClass = t.subjectType==='student' && (person as any).currentClassId ? await db.classes.get(String((person as any).currentClassId)) : null;
- const payload={v:1,kid:saved.kid,cid,sid:t.schoolId,bid:t.branchId,typ:t.subjectType,ref:String((person as any).admissionNumber||(person as any).staffNumber||(person as any).employeeNumber||t.subjectId),...(policy.showNamePublicly?{name:person.fullName}:{}),...(policy.showClassPublicly&&(detail||resolvedClass?.name)?{className:detail||resolvedClass?.name}:{}),iat:now,exp:Math.floor(expires.getTime()/1000)};
+ const payload={v:1,kid:saved.kid,cid,sid:t.schoolId,bid:t.branchId,typ:t.subjectType,ref:String((person as any).admissionNumber||(person as any).staffNumber||(person as any).employeeNumber||t.subjectId),name:String((person as any).fullName || "").trim(),...(policy.showClassPublicly&&(detail||resolvedClass?.name)?{className:detail||resolvedClass?.name}:{}),iat:now,exp:Math.floor(expires.getTime()/1000)};
  const signedPart='eid1.'+B64(new TextEncoder().encode(JSON.stringify(payload)));
  const signature=await crypto.subtle.sign('Ed25519',saved.privateKey,new TextEncoder().encode(signedPart));
  const verificationUrl=`https://schools.eleeveon.com/verify/${signedPart}.${B64(new Uint8Array(signature))}`;

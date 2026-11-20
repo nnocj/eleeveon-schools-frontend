@@ -119,7 +119,11 @@ export function lockLocalSession():void {session=null;}
  * Never expose these methods to unverified Cloud sessions or public onboarding.
  */
 export async function createLocalStaff(args:{accountId:string;displayName:string;password:string;role:'branch_admin'|'teacher';schoolId:string;branchId:string}):Promise<LocalStaffPublic>{
- requireLocalSession(args.accountId,['owner']);
+ const actor=requireLocalSession(args.accountId,['owner','branch_admin']);
+ if(actor.role==='branch_admin') {
+  const grants:LocalGrant[]=await localSessionMemberships(actor);
+  if(args.role!=='teacher'||!grants.some((g:LocalGrant)=>g.role==='branch_admin'&&g.schoolId===args.schoolId&&g.branchId===args.branchId))throw new Error('Branch Admin may create teachers only in assigned branches');
+ }
  if(!args.schoolId||!args.branchId)throw new Error('Select a school and branch');
  if(!args.displayName.trim())throw new Error('Staff name is required');
  if(!validPassword(args.password))throw new Error('Password must be at least 12 characters');
@@ -129,8 +133,9 @@ export async function createLocalStaff(args:{accountId:string;displayName:string
  return publicStaff(record);
 }
 export async function setLocalStaffActive(accountId:string,id:string,active:boolean):Promise<void>{
- requireLocalSession(accountId,['owner']);
- const d=await openDb();try{await new Promise<void>((resolve,reject)=>{const t=d.transaction(STORE,'readwrite');const store=t.objectStore(STORE);const request=store.get(id);request.onsuccess=()=>{const record=request.result as StaffRecord|undefined;if(!record||record.accountId!==accountId||record.role==='owner'){t.abort();return;}store.put({...record,active});};request.onerror=()=>t.abort();t.oncomplete=()=>resolve();t.onerror=()=>reject(t.error??new Error('Unable to change staff status'));t.onabort=()=>reject(new Error('Staff not found or owner account protected'));});}finally{d.close();}
+ const actor=requireLocalSession(accountId,['owner','branch_admin']);
+ const allowed:LocalGrant[]|null=actor.role==='owner'?null:await localSessionMemberships(actor);
+ const d=await openDb();try{await new Promise<void>((resolve,reject)=>{const t=d.transaction(STORE,'readwrite');const store=t.objectStore(STORE);const request=store.get(id);request.onsuccess=()=>{const record=request.result as StaffRecord|undefined;if(!record||record.accountId!==accountId||record.role==='owner'||(allowed && (record.role!=='teacher'||!allowed.some((g:LocalGrant)=>g.role==='branch_admin'&&g.schoolId===record.schoolId&&g.branchId===record.branchId)))){t.abort();return;}store.put({...record,active});};request.onerror=()=>t.abort();t.oncomplete=()=>resolve();t.onerror=()=>reject(t.error??new Error('Unable to change staff status'));t.onabort=()=>reject(new Error('Staff not found or owner account protected'));});}finally{d.close();}
 }
 
 export async function addLocalStaffGrant(args:{accountId:string;staffId:string;grant:LocalGrant}):Promise<void>{

@@ -21,6 +21,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import IndependentStaffManager from "../../components/independent/IndependentStaffManager";
+import { currentLocalSession } from "../../lib/independent/localStaffAuth";
 import { useRouter } from "next/navigation";
 
 import { useSettings } from "../../context/settings-context";
@@ -1187,7 +1189,7 @@ function profileSub(
 // COMPONENT
 // ======================================================
 
-export default function Usersroles() {
+function CloudUsersroles() {
   const dataRevision = useBranchTableRevision([
     "teachers",
     "students",
@@ -4527,3 +4529,14 @@ const css = `
 @media (max-width:639px) { .usersroles-page { padding:3px; } .usersroles-page .usersroles-list { grid-template-columns:minmax(0,1fr); } }
 @media (prefers-reduced-motion:reduce) { .usersroles-page .student-row { transition:none; } }
 `;
+
+// Independent authentication is local; never use Cloud membership endpoints here.
+export default function Usersroles(){
+ const independent=typeof window!=="undefined" && window.location.pathname.startsWith("/independent/");
+ if(independent){
+  const session=currentLocalSession();
+  if(!session||session.role!=="branch_admin")return <div role="alert">Sign in as an Independent Branch Admin to manage teacher access.</div>;
+  return <IndependentStaffManager accountId={session.accountId}/>;
+ }
+ return <CloudUsersroles/>;
+}

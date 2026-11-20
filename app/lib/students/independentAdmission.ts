@@ -53,6 +53,8 @@ export async function previewIndependentAdmissionNumber(args: {
   const occupied = new Set(rows.filter((s: any) => s.schoolId === args.schoolId &&
     (!s.accountId || s.accountId === args.accountId)).map((s: any) => norm(s.admissionNumber)).filter(Boolean));
   let sequence = Math.max(1, Math.floor(Number(cfg.nextSequence) || 1));
-  while (occupied.has(norm(formatAdmissionNumber(cfg, sequence)))) sequence++;
-  return formatAdmissionNumber(cfg, sequence);
+  // Formatting does not depend on mode; narrow the preview-only string mode safely.
+  const formatConfig = { ...cfg, mode: "manual" as const };
+  while (occupied.has(norm(formatAdmissionNumber(formatConfig, sequence)))) sequence++;
+  return formatAdmissionNumber(formatConfig, sequence);
 }

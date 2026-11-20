@@ -63,6 +63,7 @@ export default function IndependentOriginalPortalHost({session,license,onLock}:{
   <IndependentOnlineServices accountId={license.accountId}/>
   {toolsOpen && session.role==='owner' && <section className="mx-auto my-4 max-w-3xl rounded-xl border p-5"><IndependentStaffManager accountId={license.accountId}/><h2 className="mt-6 font-semibold">Owner-only local database recovery tools</h2><p className="my-2 text-sm">Backup files cover IndexedDB data, not external media directories. Never restore while other application windows are open.</p><button className="mb-3 rounded border px-3 py-2" disabled={checkingDb} onClick={()=>{setCheckingDb(true);void checkIndependentSchoolDatabase().then(setReadiness).finally(()=>setCheckingDb(false));}}>Check EleeveonDB</button>{readiness?.available && <><IndependentBackupPanel databaseName={APP_DB_NAME} accountId={license.accountId}/><IndependentRestorePanel databaseName={APP_DB_NAME} accountId={license.accountId}/></>}{readiness && !readiness.available && <p role="alert">{readiness.reason}</p>}</section>}
   {!confirmed ? <section className="mx-auto mt-12 max-w-xl rounded-xl border p-6"><h1 className="text-xl font-bold">Original Eleeveon Schools portals</h1><p className="mt-3">This screen mounts your unchanged portal components under the locally verified session. It is a development integration check; backend-only actions such as paid billing, credential issuance, account changes, and certain school modules do not yet have local services. Do not test with live student records.</p><button className="mt-5 rounded bg-blue-700 px-4 py-3 font-semibold text-white" onClick={()=>setConfirmed(true)}>Open my original {session.role.replace('_',' ')} portal</button></section> :
+   <IndependentPortalIdentityProvider value={{session,license}}>
    <DatabaseBootstrap>
     <IndependentAccountProvider session={session} selectedMembership={membership} onLock={lock}>
      <SettingsProvider>
@@ -90,6 +91,7 @@ export default function IndependentOriginalPortalHost({session,license,onLock}:{
       </ActiveBranchProvider>
      </SettingsProvider>
     </IndependentAccountProvider>
-   </DatabaseBootstrap>}
+   </DatabaseBootstrap>
+   </IndependentPortalIdentityProvider>}
  </div>;
 }

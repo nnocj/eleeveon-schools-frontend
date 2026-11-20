@@ -2633,6 +2633,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   const [admissionDraft, setAdmissionDraft] = useState({ mode: "manual" as "manual" | "automatic" | "automatic_or_manual", prefix: "", separator: "-", nextSequence: 1, padding: 3, scope: "branch" as const });
   const [savingAdmission, setSavingAdmission] = useState(false);
   const [independentAdmissionMode, setIndependentAdmissionMode] = useState(false);
+  const [admissionDeploymentResolved, setAdmissionDeploymentResolved] = useState(false);
   const [independentAdmissionPreview, setIndependentAdmissionPreview] = useState<string | null>(null);
   const [admissionPreviewLoading, setAdmissionPreviewLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -2669,14 +2670,16 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   useEffect(() => {
     let cancelled = false;
     setIndependentAdmissionMode(false);
+    setAdmissionDeploymentResolved(false);
     setIndependentAdmissionPreview(null);
     if (!selectedAccountId || !selectedSchoolId || !selectedBranchId) return;
     (async () => {
       try {
         const independent = await isIndependentAdmissionAccount(String(selectedAccountId));
-        if (!cancelled) setIndependentAdmissionMode(independent);
+        if (!cancelled) { setIndependentAdmissionMode(independent); setAdmissionDeploymentResolved(true); }
       } catch (error) {
         console.error("Could not resolve admission deployment policy", error);
+        if (!cancelled) setAdmissionDeploymentResolved(false);
       }
     })();
     return () => { cancelled = true; };
@@ -4740,8 +4743,8 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
           return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
         });
       const existing = settingsCandidates[0];
-      if (!existing) throw new Error("Save Branch Settings once before configuring admission numbers.");
-      const previous = (existing as any).admissionNumbers;
+      if (!admissionDeploymentResolved) throw new Error("Deployment mode is not yet verified. Please reopen settings and retry.");
+      const previous = (existing as any)?.admissionNumbers;
       const next = {
         mode: admissionDraft.mode || previous?.mode || "manual",
         prefix: admissionDraft.prefix.trim().toUpperCase(),
@@ -4756,8 +4759,33 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
           ? Math.max(1, Math.floor(Number(previous?.nextSequence) || 1))
           : 1,
       };
-      await updateLocal("schoolBranchSettings", existing.id, { admissionNumbers: next } as any);
-      const verified = await db.schoolBranchSettings.get(existing.id);
+      // Independent installations can configure numbering before any general
+      // Branch Settings row exists. Create a branch-scoped local row directly.
+      // Cloud retains its server-authoritative sequence behaviour.
+      let savedId = existing?.id;
+      if (savedId) {
+        await updateLocal("schoolBranchSettings", savedId, { admissionNumbers: next } as any);
+      } else {
+        const created = await createLocal("schoolBranchSettings", {
+          accountId: String(selectedAccountId),
+          schoolId: String(selectedSchoolId),
+          branchId: String(selectedBranchId),
+          admissionNumbers: next,
+          isDeleted: false,
+        } as any);
+        savedId = typeof created === "string" ? created :
+          typeof created === "number" ? String(created) :
+          String((created as any)?.id || (created as any)?.localId || "");
+        if (!savedId) {
+          const createdRow = (await db.schoolBranchSettings.where("branchId").equals(String(selectedBranchId)).toArray())
+            .filter((row: any) => !row.isDeleted && sameId(row.schoolId, selectedSchoolId) &&
+              (!row.accountId || sameId(row.accountId, selectedAccountId)) && !!row.admissionNumbers)
+            .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
+          savedId = createdRow?.id;
+        }
+        if (!savedId) throw new Error("Could not create the local branch admission configuration.");
+      }
+      const verified = await db.schoolBranchSettings.get(savedId);
       if (!(verified as any)?.admissionNumbers) throw new Error("Admission settings were not saved in Dexie.");
       setSettingsRow(verified || null);
       setAdmissionDraft(next);
@@ -5253,7 +5281,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         icon: "#",
         title: "Admission Numbers",
         subtitle: admissionDraft.mode === "manual" ? "Manual entry" : "Automatic numbering",
-        detail: `${admissionDraft.prefix || "No prefix"}${admissionDraft.separator}${"0".repeat(Math.max(3, Math.min(12, admissionDraft.padding)))} · ${independentAdmissionMode ? (admissionDraft.mode === "manual" ? "Manual numbering · Independent" : admissionPreviewLoading ? "Checking local sequence…" : `Next: ${independentAdmissionPreview || "Unavailable"} · Independent`) : "Next number assigned by server"}`,
+        detail: `${admissionDraft.prefix || "No prefix"}${admissionDraft.separator}${"0".repeat(Math.max(3, Math.min(12, admissionDraft.padding)))} · ${independentAdmissionMode ? (admissionDraft.mode === "manual" ? "Manual numbering · Independent" : admissionPreviewLoading ? "Checking local sequence…" : `Next: ${independentAdmissionPreview || "Unavailable"} · Independent`) : admissionDeploymentResolved ? "Next number assigned by server" : "Checking deployment mode…"}`,
         tone: "blue",
       },
       {
@@ -5615,8 +5643,8 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
                 <Field label="Separator"><select value={admissionDraft.separator} onChange={e => setAdmissionDraft(p => ({...p, separator: e.target.value}))}><option value="-">Hyphen (-)</option><option value="/">Slash (/)</option><option value="">None</option></select></Field>
                 <Field label="Minimum number of digits"><input type="number" min={3} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(3,Math.min(12,Number(e.target.value)||3))}))}/></Field>
                 <div className="admission-sequence-note" role="status">
-                  <strong>{independentAdmissionMode ? (admissionDraft.mode === "manual" ? "Independent · Manual numbering" : `Independent · Next number: ${admissionPreviewLoading ? "Checking…" : independentAdmissionPreview || "Unavailable"}`) : "Cloud · Next number: controlled by backend registry"}</strong>
-                  <span>{independentAdmissionMode ? "Numbers are issued locally without a Cloud connection. The saved sequence and previously issued numbers are respected. Deleted records retain their numbers." : "The server assigns the next available number. The local sequence is not authoritative for Cloud deployments."}</span>
+                  <strong>{independentAdmissionMode ? (admissionDraft.mode === "manual" ? "Independent · Manual numbering" : `Independent · Next number: ${admissionPreviewLoading ? "Checking…" : independentAdmissionPreview || "Unavailable"}`) : admissionDeploymentResolved ? "Cloud · Next number: controlled by backend registry" : "Checking deployment mode…"}</strong>
+                  <span>{independentAdmissionMode ? "Numbers are issued locally without a Cloud connection. The saved sequence and previously issued numbers are respected. Deleted records retain their numbers." : admissionDeploymentResolved ? "The server assigns the next available number. The local sequence is not authoritative for Cloud deployments." : "Waiting for the local deployment policy before enabling numbering changes."}</span>
                 </div>
                 <p className="admission-sequence-caption">{independentAdmissionMode ? "Existing admission numbers are unchanged. The next local number is allocated when a student is saved." : "Existing student IDs are not changed. New allocations use the server registry."}</p>
             </div>

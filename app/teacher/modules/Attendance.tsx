@@ -1983,8 +1983,7 @@ export default function StudentAttendance() {
     contextLoading ||
     settingsLoading ||
     !teacherAccess.ready ||
-    (canView && loadedTeacherScopeKey !== teacherDataScopeKey) ||
-    loading
+    (canView && loadedTeacherScopeKey !== teacherDataScopeKey)
   ) {
     return (
       <RouteState

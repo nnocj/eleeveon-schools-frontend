@@ -1800,7 +1800,7 @@ export default function Teacherbroadsheets() {
   };
 
   if (accountLoading || contextLoading || settingsLoading || !teacherAccess.ready ||
-      !dataLoadSettled || defaultSubjectPending) {
+      (completedDataKey.split("::").slice(0, 4).join("::") !== expectedDataKey.split("::").slice(0, 4).join("::")) || defaultSubjectPending) {
     return (
       <State
         primary={primary}

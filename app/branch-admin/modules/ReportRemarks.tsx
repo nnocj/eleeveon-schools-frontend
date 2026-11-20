@@ -2278,7 +2278,7 @@ export default function ReportRemarks() {
     more: () => setMoreOpen(true),
   });
 
-  if (accountLoading || contextLoading || settingsLoading || loading) {
+  if (accountLoading || contextLoading || settingsLoading) {
     return (
       <State
         primary={primary}
@@ -2311,6 +2311,8 @@ export default function ReportRemarks() {
   return (
     <main className={`ba-page report-remarks-page ${viewMode === "cards" ? "rr-force-cards" : viewMode === "table" ? "rr-force-table" : ""}`} style={{"--ba-primary":primary,"--primary-color":primary} as React.CSSProperties}>
       <style>{css}</style>
+      {loading && <div role="status" aria-live="polite" className="report-no-print" style={{padding:"6px 12px",fontSize:12,opacity:0.8}}>Loading local records…</div>}
+
       <RemarksExcelActions rows={studentRows.map(row=>({student:row.student,enrollment:row.enrollment,reportCard:row.reportCard}))} scope={{accountId:selectedAccountId||"",schoolId:schoolId||"",branchId:branchId||"",academicStructureId:academicStructureId||"",academicPeriodId:academicPeriodId||"",teacherOnly:false}} onImported={load} open={excelOpen} onClose={()=>setExcelOpen(false)}/>
  
       <header className="rr-command-row report-no-print">

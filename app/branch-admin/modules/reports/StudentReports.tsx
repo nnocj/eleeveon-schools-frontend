@@ -1503,7 +1503,7 @@ export default function StudentReports() {
     );
   };
 
-  if (accountLoading || contextLoading || settingsLoading || pageLoading) {
+  if (accountLoading || contextLoading || settingsLoading) {
     return (
       <State
         primary={primary}
@@ -1564,6 +1564,8 @@ export default function StudentReports() {
       }
     >
       <style>{css}</style>
+      {pageLoading && <div role="status" aria-live="polite" className="report-no-print" style={{padding:"6px 12px",fontSize:12,opacity:0.8}}>Loading local records…</div>}
+
 
       {!hasCompleteReportScope && (
         <section className="ba-v6-scope-picker report-no-print" aria-label="Select reporting context">

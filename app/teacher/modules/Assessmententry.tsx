@@ -1931,6 +1931,8 @@ export default function AssessmentEntries() {
     print: printAssessmentTable,
   });
 
+  // A first scoped read is required for teacher authorization and to prevent
+  // a previous teacher’s rows from appearing. Later refreshes remain nonblocking.
   // Skeletons are used only until the first successful local read for this
   // workspace. Subsequent background reads leave the actual records visible.
   // On first entry the skeleton resembles the view currently being opened:

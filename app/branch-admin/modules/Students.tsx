@@ -2921,7 +2921,7 @@ export default function StudentsPage() {
     }
   }, []);
 
-  if (accountLoading || contextLoading || settingsLoading || loading) {
+  if (accountLoading || contextLoading || settingsLoading) {
     return (
       <State
         primary={primary}
@@ -2982,6 +2982,11 @@ export default function StudentsPage() {
       }
     >
       <style>{css}</style>
+      {loading && (
+        <div role="status" aria-live="polite" style={{ padding: "6px 12px", fontSize: 12, opacity: 0.75 }}>
+          Loading local students records in the background… You can begin adding records.
+        </div>
+      )}
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>

@@ -2260,7 +2260,7 @@ export default function ReportRemarks() {
     return <State primary={primary} spin={false} title="Teacher workspace required"
       text="Open Reports through a linked teacher membership in the correct school branch." />;
   }
-  if (loading || loadedScopeKey !== scopeKey || !initialScopeResolved) {
+  if (loadedScopeKey !== scopeKey || !initialScopeResolved) {
     return <State primary={primary} title="Opening report remarks..."
       text="Loading assigned students, classes and report cards." />;
   }

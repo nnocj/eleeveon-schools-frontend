@@ -1900,7 +1900,7 @@ export default function AssessmentEntries() {
     print: printAssessmentTable,
   });
 
-  if (accountLoading || contextLoading || settingsLoading || loading) {
+  if (accountLoading || contextLoading || settingsLoading) {
     return (
       <State
         primary={primary}
@@ -1951,6 +1951,8 @@ export default function AssessmentEntries() {
       style={{ "--ae-primary": primary } as React.CSSProperties}
     >
       <style>{css}</style>
+      {loading && <div role="status" aria-live="polite" className="report-no-print" style={{padding:"6px 12px",fontSize:12,opacity:0.8}}>Loading local records…</div>}
+
 
       {toast && (
         <section className={`ae-toast ${toast.tone}`}>

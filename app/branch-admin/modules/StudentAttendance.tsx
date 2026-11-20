@@ -1933,8 +1933,7 @@ export default function StudentAttendance() {
   if (
     accountLoading ||
     contextLoading ||
-    settingsLoading ||
-    loading
+    settingsLoading
   ) {
     return (
       <RouteState
@@ -1993,6 +1992,7 @@ export default function StudentAttendance() {
           } as React.CSSProperties
         }
       >
+      {loading && <div role="status" aria-live="polite" className="report-no-print" style={{padding:"6px 12px",fontSize:12,opacity:0.8}}>Loading local records…</div>}
         <style>{css}</style>
 
         {toast ? (

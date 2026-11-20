@@ -1577,7 +1577,7 @@ export default function Teacherreports() {
   };
 
   if (accountLoading || contextLoading || settingsLoading || !teacherAccess.ready ||
-      !dataLoadSettled || defaultScopePending) {
+      (loadedScopeWorkspace !== teacherWorkspaceKey) || defaultScopePending) {
     return (
       <State
         primary={primary}

@@ -1802,7 +1802,7 @@ export default function TeachersPage() {
     }
   }, []);
 
-  if (accountLoading || contextLoading || settingsLoading || loading)
+  if (accountLoading || contextLoading || settingsLoading)
     return (
       <State
         primary={primary}
@@ -1848,6 +1848,11 @@ export default function TeachersPage() {
       style={{ "--ba-primary": primary } as React.CSSProperties}
     >
       <style>{css}</style>
+      {loading && (
+        <div role="status" aria-live="polite" style={{ padding: "6px 12px", fontSize: 12, opacity: 0.75 }}>
+          Loading local teachers records in the background… You can begin adding records.
+        </div>
+      )}
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}

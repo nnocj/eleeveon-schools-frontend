@@ -1739,7 +1739,7 @@ export default function Broadsheets() {
     );
   };
 
-  if (accountLoading || contextLoading || settingsLoading || pageLoading) {
+  if (accountLoading || contextLoading || settingsLoading) {
     return (
       <State
         primary={primary}
@@ -1790,6 +1790,8 @@ export default function Broadsheets() {
       style={{ "--ba-primary": primary } as React.CSSProperties}
     >
       <style>{css}</style>
+      {pageLoading && <div role="status" aria-live="polite" className="report-no-print" style={{padding:"6px 12px",fontSize:12,opacity:0.8}}>Loading local records…</div>}
+
 
       <section className="ba-print-card">
         <BranchReportPreview printZoneId={BROADSHEET_PRINT_ZONE_ID} naturalWidth={1122}>

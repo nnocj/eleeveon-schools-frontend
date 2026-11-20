@@ -2508,7 +2508,7 @@ function RolePortalShellContent({
             </div>
           )}
           </div>
-          {activeModuleTables.length > 0 && !moduleFullyReady ? (
+          {!independentWorkspace && activeModuleTables.length > 0 && !moduleFullyReady ? (
             <section className="role-module-first-download" role="status" aria-live="polite">
               <div className="role-module-first-download-card">
                 {!moduleDownloadError && moduleReadiness.online ? (

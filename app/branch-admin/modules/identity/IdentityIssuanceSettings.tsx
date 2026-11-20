@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { db } from "../../../lib/db/db";
 import { updateLocal } from "../../../lib/sync/syncUtils";
 import { identityApi, type IdentityPolicy, type IssuanceMode } from "./identityApi";
+import { isIndependentIdentity, readLocalIdentityPolicy, saveLocalIdentityPolicy } from "../../../lib/identity/independentIdentity";
 
 const defaultPolicy: IdentityPolicy = {
   studentMode: "manual", teacherMode: "manual", expiryMonths: 12,
@@ -54,6 +55,10 @@ export default function IdentityIssuanceSettings({ accountId, schoolId, branchId
     setLoading(true);
     const run = async () => {
       try {
+        if(await isIndependentIdentity(accountId)) {
+          if(!cancelled){setPolicy(readLocalIdentityPolicy(accountId,schoolId,branchId));setPending(false);setMessage('Independent: settings stored locally; no school records sent to server.');}
+          return;
+        }
         const cached = await readSetting();
         if (cancelled) return;
         const saved = (cached as any)?.identityIssuancePolicyCache as CachedPolicy | undefined;
@@ -92,6 +97,10 @@ export default function IdentityIssuanceSettings({ accountId, schoolId, branchId
     setSaving(true);
     setMessage("");
     try {
+      if(await isIndependentIdentity(accountId)) {
+        saveLocalIdentityPolicy(accountId,schoolId,branchId,policy);
+        setPending(false);setMessage('Independent ID policy saved locally.');return;
+      }
       // Durable local write FIRST, even without a network connection.
       await cachePolicy(policy, true);
       setPending(true);

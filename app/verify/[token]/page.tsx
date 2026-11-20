@@ -17,7 +17,7 @@ type PublicVerification = {
 };
 
 type CheckResult =
-  | { kind: "active"; data: PublicVerification }
+  | { kind: "active" | "signed"; data: PublicVerification }
   | { kind: "invalid" | "revoked" | "expired" | "inactive" }
   | { kind: "unavailable" };
 
@@ -39,7 +39,7 @@ function apiRoot(): string {
 }
 
 async function checkCredential(token: string): Promise<CheckResult> {
-  if (!TOKEN_PATTERN.test(token)) return { kind: "invalid" };
+  if (!TOKEN_PATTERN.test(token) && !/^eid1\.[A-Za-z0-9_-]{1,2000}\.[A-Za-z0-9_-]{86}$/.test(token)) return { kind: "invalid" };
 
   try {
     const url = `${apiRoot()}/identity/verify/${encodeURIComponent(token)}`;
@@ -64,6 +64,7 @@ async function checkCredential(token: string): Promise<CheckResult> {
     }
 
     const data = body as PublicVerification;
+    if (data.valid === true && data.status === "signature_valid") return { kind: "signed", data };
     if (data.valid === true && data.status === "active") {
       return { kind: "active", data };
     }
@@ -97,7 +98,7 @@ function dateText(value?: string | null): string | null {
 }
 
 function StatusIcon({ kind }: { kind: CheckResult["kind"] }) {
-  if (kind === "active") {
+  if (kind === "active" || kind === "signed") {
     return (
       <svg viewBox="0 0 48 48" width="40" height="40" fill="none" aria-hidden="true">
         <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="2.5" />
@@ -135,6 +136,10 @@ const messages: Record<CheckResult["kind"], { title: string; description: string
     title: "Valid school ID",
     description: "This ID is active in the issuing school's online records.",
   },
+  signed: {
+    title: "Authentic Independent school ID",
+    description: "Digital signature and expiry verified. No revocation was reported to Eleeveon, but current school enrollment cannot be independently confirmed from local-only school records.",
+  },
   revoked: {
     title: "ID no longer valid",
     description: "The issuing school has revoked or replaced this credential. Ask the school for a current ID.",
@@ -161,7 +166,7 @@ export default async function VerifyCardPage({ params }: PageProps) {
   const { token } = await params;
   const result = await checkCredential(token || "");
   const message = messages[result.kind];
-  const person = result.kind === "active" ? result.data : null;
+  const person = result.kind === "active" || result.kind === "signed" ? result.data : null;
   const name = person?.fullName?.trim() || "";
   const school = person?.schoolName?.trim() || "";
   const branch = person?.branchName?.trim() || "";
@@ -182,12 +187,12 @@ export default async function VerifyCardPage({ params }: PageProps) {
           <span className="ev-online-label">Official check</span>
         </header>
 
-        <article className={`ev-card ev-card--${result.kind}`} aria-labelledby="ev-title">
+        <article className={`ev-card ev-card--${result.kind === "signed" ? "active" : result.kind}`} aria-labelledby="ev-title">
           <div className="ev-card-top">
             <span className="ev-eyebrow">SCHOOL ID CHECK</span>
-            <span className="ev-online-dot"><span aria-hidden="true" />Live record</span>
+            <span className="ev-online-dot"><span aria-hidden="true" />{result.kind === "signed" ? "Signed credential" : "Live record"}</span>
           </div>
-          <div className={`ev-status-icon ev-status-icon--${result.kind}`}>
+          <div className={`ev-status-icon ev-status-icon--${result.kind === "signed" ? "active" : result.kind}`}>
             <StatusIcon kind={result.kind} />
           </div>
           <p className="ev-status-kicker">Verification result</p>
@@ -222,7 +227,7 @@ export default async function VerifyCardPage({ params }: PageProps) {
         </article>
 
         <footer className="ev-footer">
-          <span>Verification reflects the school's current online record. A valid QR code alone does not prove that the person presenting it is the cardholder.</span>
+          <span>{result.kind === "signed" ? "Independent: signature and reported revocations checked; current enrollment is not independently confirmed. A QR code does not prove the presenter is the cardholder." : "Verification reflects the school's current online record. A valid QR code alone does not prove that the person presenting it is the cardholder."}</span>
           <span className="ev-footer-brand">Powered by Eleeveon Schools</span>
         </footer>
       </div>

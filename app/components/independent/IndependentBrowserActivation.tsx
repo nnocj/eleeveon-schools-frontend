@@ -53,7 +53,6 @@ export default function IndependentBrowserActivation({onActivated}:{onActivated:
       try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});}
       catch{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});}
       streamRef.current=stream;activeRef.current=true;setScanOpen(true);
-      await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
       const video=videoRef.current;
       if(!video){stopScan();throw new Error('Camera preview unavailable.');}
       video.srcObject=stream;await video.play();
@@ -118,7 +117,7 @@ export default function IndependentBrowserActivation({onActivated}:{onActivated:
     <input required type="password" autoComplete="current-password" placeholder="Owner account password" className="rounded border p-3" value={password} onChange={e=>setPassword(e.target.value)}/>
     <div className="grid gap-2">
       <button type="button" className="rounded border p-3" onClick={()=>scanOpen?stopScan():void startScan()}>{scanOpen?'Stop camera':'Scan activation QR with camera'}</button>
-      {scanOpen&&<video ref={videoRef} autoPlay muted playsInline className="w-full rounded border" aria-label="QR scanning camera preview"/>}
+      <video ref={videoRef} autoPlay muted playsInline className={scanOpen ? 'w-full rounded border' : 'hidden'} aria-label="QR scanning camera preview"/>
       <canvas ref={canvasRef} className="hidden" aria-hidden="true"/>
       <label className="rounded border p-3 text-center cursor-pointer">Scan QR from photo or screenshot
         <input type="file" accept="image/*" onChange={e=>void scanImage(e)} className="sr-only" aria-label="Choose QR image"/>

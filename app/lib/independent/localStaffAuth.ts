@@ -143,7 +143,7 @@ export async function addLocalStaffGrant(args:{accountId:string;staffId:string;g
   const tx=d.transaction(STORE,'readwrite');const store=tx.objectStore(STORE);const req=store.get(args.staffId);
   req.onsuccess=()=>{const record=req.result as StaffRecord|undefined;
    if(!record||record.accountId!==args.accountId||!record.active||record.role!==args.grant.role||(record.role==='teacher'&&!args.grant.teacherId)){tx.abort();return;}
-   const grants:LocalGrant[]=record.grants || (record.role==='owner'?[]:[{role:record.role,schoolId:record.schoolId||'',branchId:record.branchId||''}]);
+   const grants:LocalGrant[]=record.grants || [{role:record.role,schoolId:record.schoolId||'',branchId:record.branchId||'',...(record.teacherId?{teacherId:record.teacherId}:{})}];
    if(!grants.some(g=>g.role===args.grant.role&&g.schoolId===args.grant.schoolId&&g.branchId===args.grant.branchId))
     store.put({...record,grants:[...grants,args.grant]});
   };req.onerror=()=>tx.abort();tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||new Error('Grant failed'));

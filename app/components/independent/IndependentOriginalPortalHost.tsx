@@ -39,12 +39,12 @@ function OfflineSyncStatus() {
 export default function IndependentOriginalPortalHost({session,license,onLock}:{session:LocalSession;license:OfflineLicenseClaims;onLock:()=>void}) {
  const [confirmed,setConfirmed]=useState(true);
  const [grants,setGrants]=useState<LocalGrant[]>([]);
- const [selectedKey,setSelectedKey]=useState('owner');
+ const [selectedKey,setSelectedKey]=useState('');
  const [grantError,setGrantError]=useState('');
  const reloadGrants=useCallback(()=>{void localSessionMemberships(session).then(setGrants).catch(e=>setGrantError(String(e)));},[session]);
  useEffect(()=>{reloadGrants();window.addEventListener('independent-grants-changed',reloadGrants);return()=>window.removeEventListener('independent-grants-changed',reloadGrants);},[reloadGrants]);
  const workspaces=grants.filter(g=>g.role!=='teacher'||Boolean(g.teacherId)).map(g=>({...g,key:`${g.role}:${g.schoolId}:${g.branchId}`}));
- const chosen=workspaces.find(g=>g.key===selectedKey);
+ const chosen=workspaces.find(g=>g.key===selectedKey)||workspaces[0];
  const effectiveRole=chosen?.role || session.role;
  const membership:UserMembership=chosen?{id:`independent:${session.id}:${chosen.key}`,accountId:session.accountId,role:chosen.role,schoolId:chosen.schoolId,branchId:chosen.branchId,teacherId:chosen.teacherId||null,active:true}:{id:`independent:${session.id}`,accountId:session.accountId,role:session.role==='owner'?'super_admin':session.role,schoolId:session.schoolId||null,branchId:session.branchId||null,teacherId:null,active:true};
  const [toolsOpen,setToolsOpen]=useState(false);

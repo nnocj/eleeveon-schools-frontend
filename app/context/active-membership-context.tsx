@@ -164,27 +164,27 @@ export function IndependentActiveMembershipProvider({ children, session, selecte
     role: session.role === 'owner' ? 'super_admin' : session.role,
     schoolId: local.schoolId || null,
     branchId: local.branchId || null,
-    teacherId: session.role === 'teacher' ? session.id : null,
+    teacherId: session.role === 'teacher' ? (selectedMembership?.teacherId || session.teacherId || null) : null,
     active: true,
-  }), [session]);
-  const [selected, setSelected] = React.useState<UserMembership>(selectedMembership || membership);
-  React.useEffect(() => { setSelected(selectedMembership || membership); }, [selectedMembership, membership]);
+  }), [session, selectedMembership]);
+  const [selected, setSelected] = React.useState<UserMembership>(membership);
+  React.useEffect(() => { setSelected(membership); }, [membership]);
   const setScoped = React.useCallback(async (requested: UserMembership | null) => {
     if (!requested) throw new Error('Independent membership cannot be cleared while signed in');
-    if (requested.accountId !== session.accountId || requested.role !== (selectedMembership || membership).role) {
+    if (requested.accountId !== session.accountId || requested.role !== membership.role) {
       throw new Error('Independent role and account cannot be changed by portal navigation');
     }
-    if (session.role !== 'owner' && (requested.branchId !== (selectedMembership?.branchId || local.branchId) || requested.schoolId !== (selectedMembership?.schoolId || local.schoolId))) {
+    if (session.role !== 'owner' && (requested.branchId !== local.branchId || requested.schoolId !== local.schoolId)) {
       throw new Error('This staff member is restricted to the assigned branch');
     }
-    const permitted: UserMembership = {...(selectedMembership || membership),
-      schoolId: session.role === 'owner' ? requested.schoolId || null : (selectedMembership?.schoolId || local.schoolId || null),
-      branchId: session.role === 'owner' ? requested.branchId || null : (selectedMembership?.branchId || local.branchId || null),
+    const permitted: UserMembership = {...membership,
+      schoolId: session.role === 'owner' ? requested.schoolId || null : local.schoolId || null,
+      branchId: session.role === 'owner' ? requested.branchId || null : local.branchId || null,
     };
     setSelected(permitted);
     await setActiveSchoolId(permitted.schoolId || null);
     await setActiveBranchId(permitted.branchId || null);
-  }, [membership, selectedMembership, session, setActiveSchoolId, setActiveBranchId]);
+  }, [membership, session, setActiveSchoolId, setActiveBranchId]);
   React.useEffect(() => {
     // Clear any Cloud workspace selection on mounting a locally authenticated runtime.
     clearStoredActiveMembership();

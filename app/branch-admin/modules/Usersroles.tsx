@@ -22,7 +22,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import IndependentStaffManager from "../../components/independent/IndependentStaffManager";
-import { currentLocalSession } from "../../lib/independent/localStaffAuth";
+import {currentLocalSession} from "../../lib/independent/localStaffAuth";
+import {useIndependentPortalIdentity} from "../../lib/independent/independentPortalContext";
 import { useRouter } from "next/navigation";
 
 import { useSettings } from "../../context/settings-context";
@@ -4530,13 +4531,8 @@ const css = `
 @media (prefers-reduced-motion:reduce) { .usersroles-page .student-row { transition:none; } }
 `;
 
-// Independent authentication is local; never use Cloud membership endpoints here.
 export default function Usersroles(){
- const independent=typeof window!=="undefined" && window.location.pathname.startsWith("/independent/");
- if(independent){
-  const session=currentLocalSession();
-  if(!session||session.role!=="branch_admin")return <div role="alert">Sign in as an Independent Branch Admin to manage teacher access.</div>;
-  return <IndependentStaffManager accountId={session.accountId}/>;
- }
+ const identity=useIndependentPortalIdentity();
+ if(identity){const session=currentLocalSession();if(!session||session.role!=='branch_admin'||session.accountId!==identity.session.accountId)return <div role="alert">Independent Branch Admin authentication required.</div>;return <IndependentStaffManager accountId={session.accountId}/>;}
  return <CloudUsersroles/>;
 }

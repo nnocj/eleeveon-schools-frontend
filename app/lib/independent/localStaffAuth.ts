@@ -88,6 +88,13 @@ export async function provisionFirstLocalOwner(args:{accountId:string;displayNam
 export async function listLocalStaff(accountId:string):Promise<LocalStaffPublic[]> {
   return (await readAll()).filter(u=>u.accountId===accountId).map(publicStaff);
 }
+/** Read-only lock information for the browser sign-in screen. Never exposes password hashes. */
+export async function localStaffLockStatus(accountId:string,id:string):Promise<{lockedUntil:number;remainingMs:number}> {
+ const user=(await readAll()).find(u=>u.id===id&&u.accountId===accountId&&u.active);
+ if(!user)return {lockedUntil:0,remainingMs:0};
+ const remainingMs=Math.max(0,(user.lockedUntil||0)-Date.now());
+ return {lockedUntil:remainingMs?user.lockedUntil:0,remainingMs};
+}
 export async function signInLocal(args:{accountId:string;id:string;password:string}):Promise<LocalSession> {
   session=null;
   const user=(await readAll()).find(u=>u.id===args.id && u.accountId===args.accountId && u.active);

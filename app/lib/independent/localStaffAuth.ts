@@ -103,7 +103,7 @@ export async function signInLocal(args:{accountId:string;id:string;password:stri
   const attempt=await derive(args.password,bytes(user.salt),user.iterations);
   if(!equalConstantTime(attempt,bytes(user.verifier))) {
     user.failed+=1;
-    if(user.failed>=5){user.failed=0;user.lockedUntil=Date.now()+15*60_000;}
+    if(user.failed>=5){user.failed=0;user.lockedUntil=Date.now()+15_000;}
     await write(user);
     throw new Error('Incorrect credentials or inactive local account');
   }

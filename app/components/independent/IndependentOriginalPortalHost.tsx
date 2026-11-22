@@ -43,9 +43,13 @@ export default function IndependentOriginalPortalHost({session,license,onLock}:{
  const [grantError,setGrantError]=useState('');
  const reloadGrants=useCallback(()=>{void localSessionMemberships(session).then(setGrants).catch(e=>setGrantError(String(e)));},[session]);
  useEffect(()=>{reloadGrants();window.addEventListener('independent-grants-changed',reloadGrants);return()=>window.removeEventListener('independent-grants-changed',reloadGrants);},[reloadGrants]);
- const workspaces=grants.filter(g=>g.role!=='teacher'||Boolean(g.teacherId)).map(g=>({...g,key:`${g.role}:${g.schoolId}:${g.branchId}`}));
+ const teacherPortalAllowed = license.edition === 'independent_multi_device';
+ const workspaces=grants.filter(g=>(g.role!=='teacher'||(teacherPortalAllowed && Boolean(g.teacherId)))).map(g=>({...g,key:`${g.role}:${g.schoolId}:${g.branchId}`}));
  const chosen=workspaces.find(g=>g.key===selectedKey)||workspaces[0];
  const effectiveRole = session.role === 'owner' ? 'owner' : (chosen?.role ?? session.role);
+ // A signed Essentials licence never entitles this installation to the Teacher Portal.
+ // This UI guard is defense in depth, not a replacement for server-side authorization.
+ const editionDenied = !teacherPortalAllowed && (session.role === 'teacher' || effectiveRole === 'teacher');
  const membership:UserMembership=chosen?{id:`independent:${session.id}:${chosen.key}`,accountId:session.accountId,role:chosen.role,schoolId:chosen.schoolId,branchId:chosen.branchId,teacherId:chosen.teacherId||null,active:true}:{id:`independent:${session.id}`,accountId:session.accountId,role:session.role==='owner'?'super_admin':session.role,schoolId:session.schoolId||null,branchId:session.branchId||null,teacherId:null,active:true};
  const [toolsOpen,setToolsOpen]=useState(false);
  const [readiness,setReadiness]=useState<DatabaseReadiness|null>(null);
@@ -53,6 +57,7 @@ export default function IndependentOriginalPortalHost({session,license,onLock}:{
 
  const lock=useCallback(()=>{setConfirmed(true);onLock();},[onLock]);
 
+ if (editionDenied) return <main role="alert" className="mx-auto max-w-xl p-6"><h1 className="text-xl font-semibold">Teacher Portal unavailable</h1><p className="mt-2">Independent Essentials does not include teacher sign-in. Ask the Branch Admin to share an Excel assessment workbook for completion and import, or upgrade to Independent Multi-device.</p><button type="button" className="mt-4 rounded border px-4 py-2" onClick={lock}>Lock</button></main>;
  if (session.accountId !== license.accountId || session.expiresAt<=Date.now())
    return <section role="alert">Local session does not match the verified Independent license.</section>;
  return <div className="min-h-dvh">

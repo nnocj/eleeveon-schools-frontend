@@ -24,7 +24,7 @@ import {
   type WorkspaceBootstrapProgress,
 } from "../lib/sync/workspaceBootstrap";
 import { useRouter } from "next/navigation";
-import { readVerifiedBrowserLicense, listVerifiedBrowserLicenses, independentWorkspaceUrl } from "../lib/independent/browserLicense";
+import { readVerifiedBrowserLicense } from "../lib/independent/browserLicense";
 
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
 import { setAccountId } from "../lib/sync/syncConfig";
@@ -302,29 +302,6 @@ function openPath(router: ReturnType<typeof useRouter>, path: string) {
 
 export default function LoginPage() {
   const router = useRouter();
-  const [loginPath, setLoginPath] = useState<"choose" | "cloud" | "independent">("choose");
-  const [installedLicenses, setInstalledLicenses] = useState<Array<{accountId:string; edition:string; licenseId:string; selector:string}>>([]);
-  const [licenseCheckError, setLicenseCheckError] = useState("");
-  const [independentCheck, setIndependentCheck] = useState(true);
-  useEffect(() => {
-    let alive = true;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("cloud") === "1" || params.has("independentPlanId")) {
-      setLoginPath("cloud"); setIndependentCheck(false); return;
-    }
-    void listVerifiedBrowserLicenses().then(results => {
-      if (!alive) return;
-      setInstalledLicenses(results.map(result => ({
-        accountId: result.claims.accountId,
-        edition: String(result.claims.edition || "Independent"),
-        licenseId: String((result.claims as any).licenseId || "Installed license"), selector: result.selector
-      })));
-    }).catch(error => {
-      if (alive) setLicenseCheckError(error instanceof Error ? error.message : "License verification failed");
-    }).finally(() => { if (alive) setIndependentCheck(false); });
-    return () => { alive = false; };
-  }, []);
-
   const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -340,7 +317,7 @@ export default function LoginPage() {
   };
 
   const submit = async () => {
-    if (loading || independentCheck) return;
+    if (loading) return;
     if (!form.email.trim()) return alert("Enter your email address");
     if (!form.password.trim()) return alert("Enter your password");
 
@@ -373,25 +350,21 @@ export default function LoginPage() {
       const memberships = collectMemberships(res);
       const role = normalizeRole(res.user.role);
 
-      // Online Cloud authentication is not authorization to read an Independent
-      // school's local database. Only hand off to an already verified local
-      // installation for the exact same account, where local staff must still
-      // authenticate and have the proper school/branch grant.
-      // ?cloud=1 is an explicit request for Cloud account services.
+      saveAuthToken(token);
+      setAccountId(res.user.accountId);
+      saveLoginContext(res, memberships);
+      // Authenticate centrally before resolving the installation's storage policy.
+      // A verified Independent license only selects the runtime; it never grants
+      // access without centrally issued identity and separately verified scope.
       const explicitCloud = new URLSearchParams(window.location.search).get("cloud") === "1";
       if (!explicitCloud) {
         const installed = await readVerifiedBrowserLicense();
         if (installed && installed.claims.accountId === res.user.accountId) {
-          // Do not persist the Cloud token or memberships into Independent's
-          // browser context. The Independent runtime will verify local identity.
           openPath(router, "/independent/workspace");
           return;
         }
       }
 
-      saveAuthToken(token);
-      setAccountId(res.user.accountId);
-      saveLoginContext(res, memberships);
       // Explicit public Independent-plan handoff. Only a selected plan ID is accepted;
       // never accept a caller-supplied return URL or bypass membership authorization.
       const independentPlanId = new URLSearchParams(window.location.search).get("independentPlanId");
@@ -573,32 +546,6 @@ export default function LoginPage() {
         setBootstrapError(reason);
       }
     };
-
-  if (independentCheck) return <main className="login-page"><p>Checking installed Independent licenses…</p></main>;
-
-  if (loginPath === "choose" || loginPath === "independent") return (
-    <main className="min-h-dvh grid place-items-center p-4 bg-slate-50 text-slate-900">
-      <section className="w-full max-w-lg rounded-2xl border bg-white p-6 shadow-sm grid gap-4">
-        <header><h1 className="text-2xl font-bold">Eleeveon Schools</h1><p className="text-sm text-slate-600">Choose how to access your workspace.</p></header>
-        <div className="grid grid-cols-2 gap-3">
-          <button type="button" className={`rounded-xl border p-4 text-left ${loginPath === "choose" ? "border-slate-300" : ""}`} onClick={() => setLoginPath("cloud")}><strong>☁ Cloud Account</strong><p className="mt-1 text-xs">Online account sign-in</p></button>
-          <button type="button" className={`rounded-xl border p-4 text-left ${loginPath === "independent" ? "border-blue-600" : ""}`} onClick={() => setLoginPath("independent")}><strong>🔑 Independent License</strong><p className="mt-1 text-xs">Local licensed workspace</p></button>
-        </div>
-        {loginPath === "independent" && <div className="grid gap-3">
-          <h2 className="font-semibold">Installed licenses</h2>
-          {installedLicenses.length ? installedLicenses.map(license => <button key={license.selector} type="button" className="rounded-xl border p-4 text-left hover:border-blue-600" onClick={() => window.location.assign(independentWorkspaceUrl(license.selector))}>
-            <strong>{license.edition.replaceAll("_", " ")}</strong>
-            <p className="text-xs text-slate-600">Account: {license.accountId}</p>
-            <p className="text-xs text-slate-600">{license.licenseId} · Continue to local staff sign-in</p>
-          </button>) : <p className="text-sm text-slate-600">No verified Independent license is installed in this browser profile.</p>}
-          {licenseCheckError && <p role="alert" className="text-sm text-red-700">Stored license could not be verified: {licenseCheckError}. Open the Independent workspace for recovery. No local data will be deleted.</p>}
-          <button type="button" className="rounded-lg bg-blue-700 p-3 font-semibold text-white" onClick={() => window.location.assign("/independent/workspace?activate=1")}>Activate another Independent license</button>
-          <p className="text-xs text-slate-600">Activation requires the commercial account owner's credentials and the paid license ID/key. Staff then sign in locally. Each new license opens a separate local database and staff credential store.</p>
-        </div>}
-        {loginPath === "choose" && <p className="text-sm text-slate-600">Cloud sign-in remains available even when an Independent license is installed. Independent login never calls Cloud workspace bootstrap.</p>}
-      </section>
-    </main>
-  );
 
   return (
     <main className="login-page">

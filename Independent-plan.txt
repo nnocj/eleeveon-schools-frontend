@@ -1,0 +1,249 @@
+Phase 1 — Foundation, code review and compatibility
+Before introducing new systems, we will inspect the existing implementations and identify what can be reused.
+
+I have verified the latest uploaded ZIP structures:
+- Backend src ZIP: 194 entries, including authentication, accounts and billing modules.
+- Frontend app ZIP: 1,333 entries, including existing portal and application files.
+- Prisma migrations: nine migration directories, including 20261120_independent_identity.
+This is an inventory check, not yet a complete code-level audit.
+
+Work to complete
+- Map existing authentication, memberships, roles and licenses.
+- Examine the existing Independent activation and signed certificate system.
+- Trace Cloud synchronization and local offline storage.
+- Map the existing Excel importer, reporting and finance workflows.
+- Review the existing billing, checkout and entitlement implementations.
+- Confirm database migrations are compatible with current production records.
+- Define the interface between central identity, Cloud sync and Independent sync.
+Acceptance gate: Existing Cloud schools and the paid Essentials installation continue working unchanged in a test environment. We must establish this baseline before modifying production code.
+Phase 2 — Unified identity, staff access and portal routing
+All users will have one Eleeveon email/password identity.
+
+The central backend will manage:
+- Accounts, schools and branches.
+- Owner, Branch Admin and Teacher identities.
+- Class and subject identifiers.
+- Staff assignments and access permissions.
+- School package and deployment type.
+- Authorized devices and login sessions.
+- Password resets, staff deactivation and revocation.
+- Protected offline access after initial provisioning.
+A person belonging to multiple schools should be able to select the appropriate school after signing in.
+
+Essentials: The school can maintain teacher records and assignments, but teachers do not receive Teacher Portal access.
+
+Multi-device: Teachers receive portal access based on their active memberships, assignments and entitlements.
+
+Acceptance gate: Unauthorized users cannot open a portal or retrieve another school's data, even by calling backend endpoints directly.
+Phase 3 — Licensing, activation and Google Drive provisioning
+This phase connects Independent software to Eleeveon's managed infrastructure.
+
+Licensing
+- Preserve existing paid Essentials licenses and certificates.
+- Automatically discover purchased entitlements.
+- Support one-time Essentials and Multi-device purchases.
+- Support package upgrades without deleting school data.
+- Distinguish perpetual software rights from renewable services.
+- Maintain Eleeveon Hub, support requests and remote licensing functions.
+Google Drive
+- Owner connects a school-controlled Google account.
+- Backend completes secure Google OAuth authorization.
+- Store refresh tokens encrypted.
+- Create or select the managed school storage location.
+- Initialize manifests, encryption metadata and backup structures.
+- Display connection status, quota-related failures and recovery options.
+- Allow authorized reconnection and disconnection.
+The school must also have a documented way to export its data and recover from a disconnected or unavailable Google account.
+
+Acceptance gate: An Essentials school can provision Drive without changing its license, and one school cannot access another school's Drive connection.
+Phase 4 — Independent Essentials completion
+This phase concentrates on the single-installation product.
+
+School operations
+
+Retain and polish the existing student, teacher, parent, class, curriculum, assessment, grading, finance, report card, broadsheet, term notice and ID card workflows within the purchased feature entitlements.
+
+Excel collaboration
+
+The Branch Admin can export class/subject assessment templates, distribute them to teachers, receive completed workbooks and import the results.
+
+We will preserve your existing sheet selection, column mapping, validation and preview system, while adding stronger duplicate detection and import summaries where needed.
+
+Backup and recovery
+- Automatic and manual encrypted backups.
+- Backup history, integrity checks and retention policies.
+- Restore previews and safe recovery.
+- Local operation when internet access is unavailable.
+- Reliable handling of interrupted uploads and incomplete backups.
+- Clear recovery procedures for lost devices.
+Acceptance gate: Complete a real school reporting workflow, create a backup, and restore it on a clean authorized test installation with matching student, score, finance and media data.
+Phase 5 — Independent Multi-device synchronization
+This is the largest technical phase.
+
+The dedicated Independent backend will coordinate multiple staff devices without moving the school's permanent operational database into Eleeveon's Cloud database.
+
+Synchronization engine
+- Initial device synchronization.
+- Incremental record downloads and uploads.
+- Offline mutation queues.
+- Change manifests and version tracking.
+- Idempotent operations and retry handling.
+- Concurrent-edit detection and conflict resolution.
+- Deleted-record synchronization and tombstone retention.
+- Media upload, download and local caching.
+- Bandwidth-efficient batching and compression.
+- Sync status, diagnostics and repair workflows.
+Role-specific access
+
+Owners and Branch Admins access their permitted school/branch information. Teachers access assigned classes, subjects, assessments and relevant students only.
+
+The gateway must enforce this server-side, including after a teacher's assignment changes or employment ends.
+
+Security design
+
+Before implementation, we will define encryption boundaries so the gateway can authorize individual records without unnecessarily exposing school data. Google Drive file revisions alone are not sufficient for safe multi-device concurrency.
+
+Acceptance gate: Two teachers can work offline on separate devices, reconnect in different orders and synchronize without losing valid changes or exposing unauthorized records.
+Phase 6 — Billing, invoices, receipts and managed services
+This phase builds the billing management system you requested for both packages.
+
+Eleeveon administrative billing page
+
+You can configure:
+- One-time license charges.
+- Annual managed synchronization charges.
+- Identity and device management charges.
+- Support and maintenance components.
+- Optional services, discounts and applicable taxes.
+- Effective pricing dates and renewal policies.
+- Detailed descriptions of what each payment covers.
+Customer-facing billing
+
+Schools can see invoices, verified receipts, payment history, service periods, upcoming renewals and the status of their purchased license.
+
+Backend
+- Persist itemized invoice snapshots.
+- Verify Paystack payments.
+- Generate numbered invoices and receipts.
+- Prevent duplicate payment processing.
+- Track refunds, adjustments and payment failures.
+- Maintain audit trails.
+- Generate printable PDF documents.
+Acceptance gate: A verified payment produces the correct entitlement and itemized receipt. Expiration of an annual service does not revoke a perpetual license.
+Phase 7 — Website, Owner Portal and commercial integration
+We will connect everything to the existing website and Owner Portal.
+
+The customer journey should be:
+1
+
+Select Essentials or Multi-device
+
+2
+
+View one-time price and managed service terms
+
+3
+
+Sign in or create Eleeveon account
+
+4
+
+Complete verified checkout
+
+5
+
+Receive license, invoice and receipt
+
+6
+
+Open Eleeveon Schools and activate
+
+7
+
+Configure school, users and Google Drive
+
+8
+
+Begin authorized offline operation
+
+
+The Owner Portal should also provide school storage management, license status, device management, managed-service renewals, backup status, recovery actions and support access.
+
+The website and Owner Billing page must display consistent prices and package descriptions.
+Phase 8 — End-to-end testing and release
+We will verify the complete product using test accounts and representative school records.
+
+Tests will cover licensing, authentication, offline operation, Excel import/export, Google Drive failure, synchronization conflicts, recovery, payments, security and package upgrades.
+
+We'll also test failure scenarios: revoked Google access, expired managed services, device loss, deleted users, duplicate imports, concurrent edits and interrupted connectivity.
+
+Production release requires more than a successful build. We will need passing tests, verified migrations, rollback procedures and a successful recovery exercise.
+
+5. Development delivery arrangement
+To keep implementation manageable, each phase will have at most two substantial packages.
+Delivery	Contents
+Backend drop-in	NestJS modules, Prisma changes, migrations, tests and configuration instructions
+Frontend drop-in	Next.js/Electron integration, portal updates, local storage integration and UI changes
+
+Some phases may need only one package. Each delivery should include an installation guide, file-change manifest, environment variable names, verification commands and rollback notes.
+
+We will not assume a stage is complete just because TypeScript compiles or the application deploys.
+6. Files we'll need during development
+You do not need to upload everything again. We'll work from your latest files and request only what is missing or has changed.
+Phase	Files needed
+1–2	Current backend src, Prisma schema/migrations, frontend authentication and portal routing
+3	Existing licensing and activation code, Owner Portal, Google Drive configuration when ready
+4	Dexie database, assessment Excel import/export, reports, backup implementation
+5	Frontend lib/sync, local data repositories, media handling, relevant backend sync services
+6	Billing and Paystack modules, checkout pages, invoice/receipt components
+7	Website source, Owner Billing and onboarding pages
+8	Test configuration, representative sanitized test data and deployment configuration
+
+You have already supplied the backend source, frontend app folder, Prisma schema and migration history.
+
+The most useful additional frontend source will be your current lib folder, especially lib/sync, Dexie database definitions, API clients, authentication helpers and local storage services. The frontend app folder alone does not necessarily contain these.
+
+Never upload .env secrets, private signing keys, live Google tokens or production database credentials.
+7. Development tracker
+We can use this as our working checklist and update it as we finish each phase.
+Implementation progress
+
+0 of 8 phases
+
+
+
+[ ] Phase 1: Foundation and compatibility
+
+[ ] Phase 2: Unified identity and portal routing
+
+[ ] Phase 3: Independent licensing and Drive provisioning
+
+[ ] Phase 4: Independent Essentials completion
+
+[ ] Phase 5: Independent Multi-device synchronization
+
+[ ] Phase 6: Billing, invoices and receipts
+
+[ ] Phase 7: Website and Owner Portal integration
+
+[ ] Phase 8: End-to-end testing and release
+
+
+ Copy progress checklist
+8. Where we should begin
+My recommendation is to begin with Phase 1 and Phase 2 together as our first development milestone, because unified authentication and authorization underpin both Independent packages.
+
+We should not start by writing the Google Drive sync engine before establishing how it identifies users, schools, devices, roles and entitlements.
+
+One additional point: because the billing system controls perpetual rights and annual service access, we'll design its underlying entitlement relationships early, even though the full billing interface comes later.
+
+Our first milestone should deliver:
+1. A verified compatibility assessment of the existing backend and frontend.
+2. Unified Cloud/Independent authentication contracts.
+3. School, branch, role and assignment resolution.
+4. Independent entitlement discovery without disturbing current licenses.
+5. Offline authorization rules and secure portal routing.
+6. A defined contract for the future Independent Sync Gateway.
+Next file to supply: Your latest frontend lib folder as a ZIP, along with any frontend authentication or Electron files located outside app and lib.
+
+Once we inspect those against the backend you supplied, we can start preparing the actual drop-in implementations, with Essentials preserved and Multi-device built as its properly differentiated upgrade

@@ -64,15 +64,25 @@ export async function listVerifiedBrowserLicenses():Promise<VerifiedBrowserLicen
  }
  return verified;
 }
-export async function readVerifiedBrowserLicense():Promise<{claims:OfflineLicenseClaims;record:BrowserLicenseRecord}|null>{
+/** Resolve an installed, cryptographically verified licence without relying on a legacy key.
+ * If several licences are installed, require an explicit selector rather than guessing. */
+export async function readVerifiedBrowserLicense():Promise<VerifiedBrowserLicense|null>{
  const selected=selectedLicenseId();
  const all=await listVerifiedBrowserLicenses();
- if(selected){const found=all.find(x=>x.selector===selected);if(!found)throw new Error('Selected licence is not installed or is not verified');return found;}
- // Preserve the existing installation and database for legacy users.
+ if(selected){
+  const found=all.find(x=>x.selector===selected);
+  if(!found)throw new Error('Selected licence is not installed or is not verified');
+  return found;
+ }
+ if(all.length===0)return null;
+ if(all.length===1)return all[0];
  const legacy=typeof window!=='undefined'&&localStorage.getItem(KEY);
- if(!legacy)return null;
- const record=JSON.parse(legacy) as BrowserLicenseRecord;
- return all.find(x=>x.selector===licenseSelector(record))||null;
+ if(legacy){
+  const legacyRecord=JSON.parse(legacy) as BrowserLicenseRecord;
+  const found=all.find(x=>x.selector===licenseSelector(legacyRecord));
+  if(found)return found;
+ }
+ throw new Error('Multiple Independent licences are installed. Open this workspace with its explicit ?license= identifier.');
 }
 export async function activateBrowserLicense(args:{licenseKey:string;licenseId:string;accountId:string}):Promise<OfflineLicenseClaims>{
   if(typeof navigator!=='undefined' && !navigator.onLine)throw new Error('Internet required for first activation');

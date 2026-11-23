@@ -37,7 +37,7 @@ export default function IndependentOriginalPortalHost({identity,license,onLogout
        <ThemeProvider><PortalAppearanceRuntime><LocalAppearanceRuntime>
         <IndependentRealtimeProvider><SyncBootstrapProvider><SyncProvider>
          <OfflineStatus/>
-         {membership.role==='owner'?<OwnerPortal/>:membership.role==='branch_admin'?<BranchPortal/>:<TeacherPortal/>}
+         {membership.role==='super_admin'?<OwnerPortal/>:membership.role==='branch_admin'?<BranchPortal/>:membership.role==='teacher'?<TeacherPortal/>:<main role="alert">This membership cannot access an Independent portal.</main>}
         </SyncProvider></SyncBootstrapProvider></IndependentRealtimeProvider>
        </LocalAppearanceRuntime></PortalAppearanceRuntime></ThemeProvider>
       </SubscriptionProvider>

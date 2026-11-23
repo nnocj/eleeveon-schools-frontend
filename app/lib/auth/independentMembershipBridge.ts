@@ -30,7 +30,7 @@ export function membershipFromVerifiedIndependentGrant(
   return {
     id: grant.membershipId,
     accountId: grant.accountId,
-    role: grant.role,
+    role: grant.role === 'owner' ? 'super_admin' : grant.role,
     schoolId: grant.schoolId,
     branchId: grant.branchId,
     teacherId: grant.role === 'teacher' ? grant.teacherId : null,

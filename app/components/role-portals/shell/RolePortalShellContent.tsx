@@ -1600,26 +1600,14 @@ function RolePortalShellContent({
           // The build-time Independent runtime may also reach this branch;
           // it must have a verified host identity to open a portal.
           const identity = independentIdentity;
-          if (!identity || identity.session.expiresAt <= Date.now() ||
-              identity.session.accountId !== accountId ||
+          if (!identity || identity.verified.accountId !== accountId ||
               identity.license.accountId !== accountId) {
-            throw new Error("Independent local authentication is missing or expired. Lock and sign in to the licensed installation.");
+            throw new Error("A verified Independent license and signed membership are required.");
           }
-          const local = identity.session;
-          const role = String(membership.role || "").toLowerCase();
-          const authorized = local.role === "owner"
-            ? role === "super_admin"
-            : role === local.role &&
-              (local.grants || [{
-                role: local.role, schoolId: local.schoolId || "",
-                branchId: local.branchId || "",
-              }]).some(grant =>
-                grant.role === role &&
-                grant.schoolId === membership.schoolId &&
-                grant.branchId === membership.branchId
-              );
-          if (!authorized) {
-            throw new Error("The selected Independent role or branch is not assigned to this local staff member.");
+          const authorizedMembership = identity.verified.membership;
+          if (String(authorizedMembership.accountId) !== String(accountId) ||
+              membershipKey(authorizedMembership) !== membershipKey(membership)) {
+            throw new Error("The selected Independent membership does not match the signed authorization.");
           }
           // The existing portals use Dexie. Never fetch Cloud bootstrap tables
           // to prove an Independent workspace is ready. Verify its local scope.
@@ -1713,7 +1701,7 @@ function RolePortalShellContent({
   }, [entryIdentity, entryRetry, authenticated, sessionVerified,
       membershipRestored, canAccess, accountRestoring, accountLoading,
       databaseContext.ready, switchingMembershipId, startupDeadline, accountOffline, allMemberships,
-      independentWorkspace, independentIdentity?.session.id,
+      independentWorkspace, independentIdentity?.verified.grant.userId,
       independentLicenseChecked, verifiedIndependentAccount, router]);
 
   const firstDownloadReady = Boolean(entryIdentity &&

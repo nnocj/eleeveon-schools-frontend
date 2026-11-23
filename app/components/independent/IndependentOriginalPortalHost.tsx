@@ -16,6 +16,7 @@ import {SyncProvider} from '../../context/sync-context';
 import {SubscriptionProvider} from '../../context/subscription-context';
 import type {VerifiedIndependentIdentity} from '../../lib/auth/independentVerifiedIdentity';
 import type {OfflineLicenseClaims} from '../../lib/independent/offlineLicense';
+import { IndependentPortalIdentityProvider } from '../../lib/independent/independentPortalContext';
 
 const OwnerPortal=dynamic(()=>import('../../owner/page'),{ssr:false});
 const BranchPortal=dynamic(()=>import('../../branch-admin/page'),{ssr:false});
@@ -28,7 +29,7 @@ export default function IndependentOriginalPortalHost({identity,license,onLogout
  const membership=identity.membership;
  if(identity.accountId!==license.accountId||identity.edition!==license.edition)return <main role="alert">Independent identity and licence do not match.</main>;
  if(identity.edition==='independent_essentials'&&membership.role==='teacher')return <main role="alert">Teacher portal is unavailable on Independent Essentials.</main>;
- return <DatabaseBootstrap>
+ return <IndependentPortalIdentityProvider value={{verified:identity,license}}><DatabaseBootstrap>
   <VerifiedIndependentAccountProvider identity={identity} onLogout={onLogout}>
    <SettingsProvider><ActiveBranchProvider>
     <VerifiedIndependentMembershipProvider membership={membership}>
@@ -37,7 +38,7 @@ export default function IndependentOriginalPortalHost({identity,license,onLogout
        <ThemeProvider><PortalAppearanceRuntime><LocalAppearanceRuntime>
         <IndependentRealtimeProvider><SyncBootstrapProvider><SyncProvider>
          <OfflineStatus/>
-         {membership.role==='super_admin'?<OwnerPortal/>:membership.role==='branch_admin'?<BranchPortal/>:membership.role==='teacher'?<TeacherPortal/>:<main role="alert">This membership cannot access an Independent portal.</main>}
+         {membership.role==='owner'?<OwnerPortal/>:membership.role==='branch_admin'?<BranchPortal/>:<TeacherPortal/>}
         </SyncProvider></SyncBootstrapProvider></IndependentRealtimeProvider>
        </LocalAppearanceRuntime></PortalAppearanceRuntime></ThemeProvider>
       </SubscriptionProvider>
@@ -45,5 +46,5 @@ export default function IndependentOriginalPortalHost({identity,license,onLogout
     </VerifiedIndependentMembershipProvider>
    </ActiveBranchProvider></SettingsProvider>
   </VerifiedIndependentAccountProvider>
- </DatabaseBootstrap>;
+ </DatabaseBootstrap></IndependentPortalIdentityProvider>;
 }

@@ -20,6 +20,20 @@ export async function syncHttp<T>(endpoint: string, options: SyncHttpOptions = {
   // Enforce account-scoped transport permissions even if a caller bypasses runSync.
   // /sync/policy itself is exempt so that the policy resolver can fetch it.
   const route = endpoint.split("?")[0].replace(/\/+$/, "");
+  // A workspace bootstrap contains school data. It is NEVER a platform-cache
+  // request. Check the server-resolved entitlement before making the POST.
+  // Do not use the permissive offline/read-only fallback for this decision.
+  if (route === "/sync/workspace-bootstrap") {
+    const accountId = getAccountId();
+    if (!accountId) throw new Error("Workspace bootstrap blocked: no active account.");
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      throw new Error("Cloud workspace bootstrap unavailable offline. Existing local records remain unchanged.");
+    }
+    const policy = await resolveSyncPolicy(accountId, { forceRefresh: true, online: true });
+    if (!policy.allowWorkspaceBootstrap || policy.mode === "hybrid" || policy.mode === "offline") {
+      throw new Error("Cloud workspace bootstrap is unavailable for this account. Independent accounts must open through the verified Independent workspace. Local records remain unchanged.");
+    }
+  }
   if (route === "/sync/push" || route === "/sync/pull") {
     const accountId = getAccountId();
     if (!accountId) throw new Error("Cloud sync blocked: account is not selected.");

@@ -41,8 +41,8 @@ import { useActiveMembership } from "../context/active-membership-context";
 
 import { db, type Branch, type School } from "../lib/db/db";
 import { apiRequest } from "../lib/platformApi";
-import IndependentStaffManager from "../components/independent/IndependentStaffManager";
-import {currentLocalSession} from "../lib/independent/localStaffAuth";
+import IndependentStaffInvitations from "../components/independent/IndependentStaffInvitations";
+
 
 // ======================================================
 // TYPES
@@ -268,9 +268,16 @@ function normalizePhone(phone?: string) {
   return String(phone || "").trim().replace(/\s+/g, " ");
 }
 
-function tempPasswordFromEmail(email: string) {
-  const prefix = normalizeEmail(email).split("@")[0].replace(/[^a-zA-Z0-9._-]/g, "");
-  return `${prefix || "user"}@123`;
+// Generate a cryptographically unpredictable first-login secret. Never derive
+// a password from an email address or use Math.random for credentials.
+function generateTemporaryPassword() {
+  const bytes = new Uint8Array(24);
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error("Secure password generation is unavailable on this device.");
+  }
+  globalThis.crypto.getRandomValues(bytes);
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
 function sameAccount(row: TenantRow, accountId?: string | null) {
@@ -1223,9 +1230,8 @@ function OwnerUsers() {
       if (key === "email") {
         const email = normalizeEmail(String(value));
         next.email = email;
-        if (!current.temporaryPassword || current.temporaryPassword === tempPasswordFromEmail(current.email)) {
-          next.temporaryPassword = tempPasswordFromEmail(email);
-        }
+        // Do not silently replace a staff member's chosen password on email edits.
+        // New users receive a secure generated password when the form opens.
       }
 
       if (key === "schoolId") {
@@ -1251,7 +1257,7 @@ function OwnerUsers() {
       ...DEFAULT_FORM,
       schoolId: firstSchool?.id ? String(firstSchool.id) : "",
       branchId: "",
-      temporaryPassword: "",
+      temporaryPassword: generateTemporaryPassword(),
     });
     setMessage("");
     setDrawerOpen(true);
@@ -1889,9 +1895,7 @@ const css = `
 export default function OwnerUsersModeAware(){
  const independent = typeof window !== 'undefined' && window.location.pathname.startsWith('/independent/');
  if(independent){
-  const session=currentLocalSession();
-  if(!session || session.role!=='owner') return <div role="alert">Sign in locally as the Independent Owner to manage users.</div>;
-  return <IndependentStaffManager accountId={session.accountId}/>;
+  return <IndependentStaffInvitations owner/>;
  }
  return <OwnerUsers/>;
 }

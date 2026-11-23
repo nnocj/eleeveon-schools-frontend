@@ -25,6 +25,7 @@ import {
 } from "../lib/sync/workspaceBootstrap";
 import { useRouter } from "next/navigation";
 import { readVerifiedBrowserLicense } from "../lib/independent/browserLicense";
+import { enrollOfflineGrantAfterLogin } from "../lib/auth/enrollOfflineGrantAfterLogin";
 
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
 import { setAccountId } from "../lib/sync/syncConfig";
@@ -353,6 +354,20 @@ export default function LoginPage() {
       saveAuthToken(token);
       setAccountId(res.user.accountId);
       saveLoginContext(res, memberships);
+      // Enroll a signed offline grant only after central authentication succeeds.
+      // Enrollment failure must be visible; it must never be mistaken for offline readiness.
+      try {
+        const offlineEnrollment = await enrollOfflineGrantAfterLogin({
+          userId: res.user.id,
+          accountId: res.user.accountId,
+          memberships,
+        });
+        if (offlineEnrollment === "no-eligible-membership") {
+          console.warn("Offline access not enabled: no eligible active membership");
+        }
+      } catch (offlineError) {
+        console.warn("Offline access enrollment failed; online login is still available", offlineError);
+      }
       // Authenticate centrally before resolving the installation's storage policy.
       // A verified Independent license only selects the runtime; it never grants
       // access without centrally issued identity and separately verified scope.

@@ -1,3 +1,4 @@
+import { readSharedAccessToken, writeSharedAccessToken, clearSharedAccessToken } from "../auth/sharedAccessToken";
 const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
@@ -130,7 +131,7 @@ export function getApiBaseUrl(): string {
 
 export function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(AUTH_TOKEN_KEY);
+  return readSharedAccessToken();
 }
 
 export function setAuthToken(token: string): void {
@@ -142,12 +143,12 @@ export function setAuthToken(token: string): void {
     throw new Error("Invalid auth token.");
   }
 
-  window.localStorage.setItem(AUTH_TOKEN_KEY, normalized);
+  writeSharedAccessToken(normalized);
 }
 
 export function clearAuthToken(): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  clearSharedAccessToken();
 }
 
 export function getStoredAuthUser<T = any>(): T | null {
@@ -248,7 +249,7 @@ export async function apiClient<T>(
       ),
       body: requestBody,
       signal: options.signal,
-      credentials: options.credentials || "omit",
+      credentials: options.credentials || "include",
     });
   } catch (error) {
     const detail =
@@ -256,9 +257,23 @@ export async function apiClient<T>(
         ? error.message
         : "Unknown network error.";
 
-    throw new Error(
+    const networkError = new Error(
       `Could not reach the Eleeveon API at ${url}. ${detail}`,
-    );
+    ) as Error & { isNetworkError: boolean };
+    networkError.isNetworkError = true;
+    throw networkError;
+  }
+
+  // A short-lived access token may expire while the durable browser session
+  // remains valid. Renew once, then retry the original request. Never retry
+  // login/refresh/logout requests or explicit caller-provided tokens.
+  if (response.status === 401 && options.token === undefined &&
+      !/^\/auth\/(login|register|refresh|logout)(?:\?|$)/.test(path)) {
+    const { renewAccessToken } = await import("../auth/renewAccessToken");
+    const renewed = await renewAccessToken(API_BASE_URL);
+    if (renewed && renewed !== token) {
+      return apiClient<T>(path, { ...options, token: renewed });
+    }
   }
 
   const text = await response.text();
@@ -270,16 +285,12 @@ export async function apiClient<T>(
       response.status,
     );
 
-    if (
-      response.status === 401 &&
-      typeof window !== "undefined"
-    ) {
-      clearAuthSession();
-    }
-
-    throw new Error(
-      `${message} [${method} ${url}]`,
-    );
+    // A 401 can mean an expired short-lived access token, not revoked identity.
+    // The account/session coordinator decides whether to renew or sign out.
+    const error = new Error(`${message} [${method} ${url}]`) as Error & { status: number; statusCode: number };
+    error.status = response.status;
+    error.statusCode = response.status;
+    throw error;
   }
 
   return data as T;

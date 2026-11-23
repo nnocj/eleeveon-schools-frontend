@@ -269,12 +269,16 @@ function normalizePhone(phone?: string) {
   return String(phone || "").trim().replace(/\s+/g, " ");
 }
 
-function tempPasswordFromEmail(email: string) {
-  const prefix = normalizeEmail(email)
-    .split("@")[0]
-    .replace(/[^a-zA-Z0-9._-]/g, "");
-
-  return `${prefix || "user"}@123`;
+// Generate a cryptographically unpredictable first-login secret. Never derive
+// a password from an email address or use Math.random for credentials.
+function generateTemporaryPassword() {
+  const bytes = new Uint8Array(24);
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error("Secure password generation is unavailable on this device.");
+  }
+  globalThis.crypto.getRandomValues(bytes);
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
 function num(value?: string | number | null) {
@@ -1296,9 +1300,7 @@ export default function Schoolusers() {
         const email = normalizeEmail(String(value));
         next.email = email;
 
-        if (!current.temporaryPassword || current.temporaryPassword === tempPasswordFromEmail(current.email)) {
-          next.temporaryPassword = tempPasswordFromEmail(email);
-        }
+        // Never derive a predictable password from a staff email.
       }
 
       return next;
@@ -1311,6 +1313,7 @@ export default function Schoolusers() {
     setForm({
       ...DEFAULT_FORM,
       branchId: branchId ? String(branchId) : "",
+      temporaryPassword: generateTemporaryPassword(),
     });
     setMessage("");
     setDrawerOpen(true);
@@ -1326,7 +1329,7 @@ export default function Schoolusers() {
       phone: item.phone,
       branchId: item.branchId ? String(item.branchId) : "",
       active: item.active,
-      temporaryPassword: item.user?.temporaryPassword || tempPasswordFromEmail(item.email),
+      temporaryPassword: item.user?.temporaryPassword || "",
     });
 
     setMessage("");
@@ -1436,8 +1439,8 @@ export default function Schoolusers() {
         name: item.user?.name || item.user?.fullName || item.membership.fullName || item.fullName,
         email: normalizeEmail(item.email),
         phone: normalizePhone(item.phone),
-        password: item.user?.temporaryPassword || tempPasswordFromEmail(item.email),
-        temporaryPassword: item.user?.temporaryPassword || tempPasswordFromEmail(item.email),
+        password: item.user?.temporaryPassword || "",
+        temporaryPassword: item.user?.temporaryPassword || "",
         mustChangePassword: item.mustChangePassword,
         active: nextActive,
         status: nextActive ? "active" : "inactive",

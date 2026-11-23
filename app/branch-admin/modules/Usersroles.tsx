@@ -21,8 +21,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import IndependentStaffManager from "../../components/independent/IndependentStaffManager";
-import {currentLocalSession} from "../../lib/independent/localStaffAuth";
+import IndependentStaffInvitations from "../../components/independent/IndependentStaffInvitations";
+
 import {useIndependentPortalIdentity} from "../../lib/independent/independentPortalContext";
 import { useRouter } from "next/navigation";
 
@@ -4533,6 +4533,6 @@ const css = `
 
 export default function Usersroles(){
  const identity=useIndependentPortalIdentity();
- if(identity){const session=currentLocalSession();if(!session||session.role!=='branch_admin'||session.accountId!==identity.session.accountId)return <div role="alert">Independent Branch Admin authentication required.</div>;return <IndependentStaffManager accountId={session.accountId}/>;}
+ if(identity){return <IndependentStaffInvitations/>;}
  return <CloudUsersroles/>;
 }

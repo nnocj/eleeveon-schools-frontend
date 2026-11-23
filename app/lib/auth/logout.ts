@@ -14,6 +14,7 @@ import { clearAccountId } from "../sync/syncConfig";
 import { stopSynchronizationForLogout } from "../sync/syncEngine";
 import { disconnectRealtime } from "../realtime/realtimeClient";
 import { lockLocalSession } from "../independent/localStaffAuth";
+import { forgetAllOfflineGrants } from "./offlineGrantStore";
 
 export const LOGOUT_EVENT_NAME = "eleeveon:atomic-logout";
 let activeLogoutPromise: Promise<void> | null = null;
@@ -58,12 +59,21 @@ export function performAtomicLogout(options: AtomicLogoutOptions = {}) {
     if (!isLogoutInProgress()) markLogoutInProgress(true);
     incrementSessionGeneration();
     stopSynchronizationForLogout();
+    // Best-effort server refresh-session revocation; local logout must work offline.
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      try {
+        const { apiRequest } = await import("../platformApi");
+        await Promise.race([apiRequest("/auth/logout", { method: "POST" }), new Promise(resolve => setTimeout(resolve, 2500))]);
+      } catch { /* Browser session still clears locally; server-side session expires/revokes separately. */ }
+    }
     // Prevent a previous Independent staff identity surviving an account change.
     lockLocalSession();
     disconnectRealtime();
     abortSessionRequests("Logout");
     notifyReactContexts();
     await options.clearReactState?.();
+    // Fail closed: never report logout complete while an offline grant remains reusable.
+    await forgetAllOfflineGrants();
     clearStorageKeys();
     clearAccountId();
 

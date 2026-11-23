@@ -1,3 +1,4 @@
+import { readSharedAccessToken, writeSharedAccessToken } from "./auth/sharedAccessToken";
 
 /**
  * app/lib/platformApi.ts
@@ -11,25 +12,9 @@ export const API_BASE_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ||
   "http://localhost:4000";
 
-export function getAuthToken() {
-  if (typeof window === "undefined") return "";
-  return (
-    localStorage.getItem("eleeveonToken") ||
-    localStorage.getItem("accessToken") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("authToken") ||
-    ""
-  );
-}
-
+export function getAuthToken() { return readSharedAccessToken() || ""; }
 export function saveAuthToken(token?: string | null) {
-  if (typeof window === "undefined" || !token) return;
-
-  localStorage.setItem("eleeveonToken", token);
-  localStorage.setItem("accessToken", token);
-  localStorage.setItem("token", token);
-  localStorage.setItem("authToken", token);
-  localStorage.setItem("eleeveon_auth_token", token);
+  if (token) writeSharedAccessToken(token);
 }
 
 export function extractToken(data: any) {
@@ -55,6 +40,7 @@ export async function apiRequest<T = any>(
   const response = await fetch(url, {
     ...options,
     headers,
+    credentials: options.credentials ?? "include",
   });
 
   const text = await response.text();
@@ -71,7 +57,10 @@ export async function apiRequest<T = any>(
       data?.message ||
       data?.error ||
       `Request failed with status ${response.status}`;
-    throw new Error(Array.isArray(message) ? message.join(", ") : message);
+    const error = new Error(Array.isArray(message) ? message.join(", ") : message) as Error & { status: number; statusCode: number };
+    error.status = response.status;
+    error.statusCode = response.status;
+    throw error;
   }
 
   return data as T;

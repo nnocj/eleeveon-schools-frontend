@@ -9,6 +9,8 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useActiveBranch } from "./active-branch-context";
+import { useAccount } from "./account-context";
+import { collectUserMemberships } from "../lib/auth/roleRedirect";
 import type { UserMembership } from "../lib/auth/roleRedirect";
 import { clearStoredActiveMembership, getStoredActiveMembership, setStoredActiveMembership } from "../lib/auth/activeMembership";
 import { subscribeToAtomicLogout } from "../lib/auth/logout";
@@ -70,23 +72,39 @@ function normalizeActiveMembership(membership: UserMembership | null): UserMembe
   };
 }
 
+/** Only a membership supplied by the authenticated account may become active. */
+function membershipPermitted(requested: UserMembership | null, allowed: UserMembership[], accountId: string | null): UserMembership | null {
+  if (!requested?.id || !accountId) return null;
+  const matched = allowed.find(candidate => candidate.id === requested.id &&
+    candidate.active !== false && candidate.isActive !== false && candidate.disabled !== true &&
+    candidate.isDeleted !== true && (!candidate.accountId || candidate.accountId === accountId));
+  if (!matched || (requested.accountId && requested.accountId !== accountId)) return null;
+  // Never copy role, school or branch from untrusted stored selection.
+  return normalizeActiveMembership({ ...matched, accountId });
+}
+
 export function ActiveMembershipProvider({ children }: { children: React.ReactNode }) {
+  const { user, accountId, authenticated, loading } = useAccount();
+  const allowedMemberships = React.useMemo(() => user ? collectUserMemberships(user) : [], [user]);
   const { setActiveSchoolId, setActiveBranchId } = useActiveBranch();
-  const [activeMembership, setActiveMembershipState] = useState<UserMembership | null>(() => normalizeActiveMembership(getStoredActiveMembership()));
-  const [restored, setRestored] = useState(true);
+  const [activeMembership, setActiveMembershipState] = useState<UserMembership | null>(null);
+  const [restored, setRestored] = useState(false);
   const [transition, setTransition] = useState<MembershipTransitionState>({ switching: false, target: null });
 
   useEffect(() => {
-    const restore = () => {
-      const stored = normalizeActiveMembership(getStoredActiveMembership());
-      if (stored) setStoredActiveMembership(stored);
-      setActiveMembershipState((current) => current || stored);
+    if (loading) return;
+    if (!authenticated || !accountId) {
+      setActiveMembershipState(null);
       setRestored(true);
-    };
-    restore();
-    window.addEventListener("storage", restore);
-    return () => window.removeEventListener("storage", restore);
-  }, []);
+      return;
+    }
+    const stored = getStoredActiveMembership();
+    const verified = membershipPermitted(stored, allowedMemberships, accountId);
+    if (!verified && stored) clearStoredActiveMembership();
+    if (verified) setStoredActiveMembership(verified);
+    setActiveMembershipState(verified);
+    setRestored(true);
+  }, [loading, authenticated, accountId, allowedMemberships]);
 
   const beginMembershipTransition = useCallback((membership: UserMembership) => {
     const normalized = normalizeActiveMembership(membership);
@@ -97,14 +115,16 @@ export function ActiveMembershipProvider({ children }: { children: React.ReactNo
   const failMembershipTransition = useCallback((error?: string) => setTransition((current) => ({ ...current, switching: false, error })), []);
 
   const setActiveMembership = useCallback(async (membership: UserMembership | null) => {
-    const normalized = normalizeActiveMembership(membership);
+    if (membership && (!authenticated || !accountId)) throw new Error("Sign in before selecting a membership.");
+    const normalized = membership ? membershipPermitted(membership, allowedMemberships, accountId) : null;
+    if (membership && !normalized) throw new Error("The selected membership is not authorized for this account.");
     setStoredActiveMembership(normalized);
     setActiveMembershipState(normalized);
     setTransition({ switching: false, target: null });
     await setActiveSchoolId(cleanId(normalized?.schoolId));
     await setActiveBranchId(cleanId(normalized?.branchId));
     window.dispatchEvent(new CustomEvent("active-membership-changed", { detail: { membership: normalized } }));
-  }, [setActiveSchoolId, setActiveBranchId]);
+  }, [setActiveSchoolId, setActiveBranchId, authenticated, accountId, allowedMemberships]);
 
   const clearActiveMembership = useCallback(() => {
     clearScopedAppearance();
@@ -122,8 +142,8 @@ export function ActiveMembershipProvider({ children }: { children: React.ReactNo
   }), []);
 
   const value = useMemo<ActiveMembershipContextType>(() => ({
-    activeMembership,
-    activeRole: activeMembership?.role || null,
+    activeMembership: authenticated && !loading ? activeMembership : null,
+    activeRole: authenticated && !loading ? activeMembership?.role || null : null,
     activeTeacherId: cleanId(activeMembership?.teacherId),
     activeStudentId: cleanId(activeMembership?.studentId),
     activeParentId: cleanId(activeMembership?.parentId),
@@ -203,6 +223,25 @@ export function IndependentActiveMembershipProvider({ children, session, selecte
     failMembershipTransition: () => {},
     setActiveMembership: setScoped,
     clearActiveMembership: () => { throw new Error('Lock the Independent installation to change staff'); },
+  };
+  return <ActiveMembershipContext.Provider value={value}>{children}</ActiveMembershipContext.Provider>;
+}
+
+/** Independent grant binds one membership. Switching requires a separately verified grant. */
+export function VerifiedIndependentMembershipProvider({children,membership}:{children:React.ReactNode;membership:UserMembership}) {
+  const {setActiveSchoolId,setActiveBranchId}=useActiveBranch();
+  React.useEffect(()=>{
+    clearStoredActiveMembership();
+    void setActiveSchoolId(membership.schoolId||null);
+    void setActiveBranchId(membership.branchId||null);
+  },[membership.id,membership.schoolId,membership.branchId,setActiveSchoolId,setActiveBranchId]);
+  const value:ActiveMembershipContextType={
+    activeMembership:membership,activeRole:membership.role,activeTeacherId:membership.teacherId||null,
+    activeStudentId:null,activeParentId:null,restored:true,transition:{switching:false,target:null},
+    beginMembershipTransition:()=>{throw new Error('A new verified grant is required to switch membership');},
+    completeMembershipTransition:()=>{},failMembershipTransition:()=>{},
+    setActiveMembership:async requested=>{if(!requested||requested.id!==membership.id||requested.accountId!==membership.accountId||requested.role!==membership.role||requested.schoolId!==membership.schoolId||requested.branchId!==membership.branchId||requested.teacherId!==membership.teacherId)throw new Error('Independent membership is bound to signed authorization');},
+    clearActiveMembership:()=>{throw new Error('Use logout to leave the Independent workspace');},
   };
   return <ActiveMembershipContext.Provider value={value}>{children}</ActiveMembershipContext.Provider>;
 }

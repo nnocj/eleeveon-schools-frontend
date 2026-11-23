@@ -42,6 +42,7 @@ import {
 import { clearStoredActiveMembership } from "../lib/auth/activeMembership";
 import { performAtomicLogout, subscribeToAtomicLogout } from "../lib/auth/logout";
 import { getSessionGeneration, isSessionGenerationCurrent } from "../lib/auth/sessionGeneration";
+import { restoreIndependentStartupAuthorization } from "../lib/auth/restoreIndependentStartupAuthorization";
 import { AccountSubscriptionDTO } from "../lib/billing/subscriptionAccess";
 import {
   collectUserMemberships,
@@ -124,6 +125,53 @@ type AccountContextType = {
 
 const AccountContext = createContext<AccountContextType | undefined>(undefined);
 
+/** Trusted signing keys must be bundled at build time, never fetched from the grant itself. */
+function pinnedOfflineSigningKeys(): Readonly<Record<string, JsonWebKey>> {
+  try {
+    const parsed: unknown = JSON.parse(process.env.NEXT_PUBLIC_ELEEVEON_OFFLINE_GRANT_KEYS || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, JsonWebKey> : {};
+  } catch { return {}; }
+}
+
+/** Return ONLY the identity and membership authorized by a verified signed grant. */
+async function verifiedIndependentOfflineUser(user: AccountUser | null, accountId: string | null): Promise<AccountUser | null> {
+  if (!user?.id || !accountId || user.accountId !== accountId) return null;
+  const keys = pinnedOfflineSigningKeys();
+  if (!Object.keys(keys).length) return null;
+  try {
+    const grant = await restoreIndependentStartupAuthorization({
+      expectedUserId: user.id, expectedAccountId: accountId, trustedSigningKeys: keys,
+    });
+    if (!grant) return null;
+    const membership = collectUserMemberships(user).find(m =>
+      m.id === grant.membershipId && m.active !== false && m.isActive !== false &&
+      m.disabled !== true && m.isDeleted !== true &&
+      (!m.accountId || m.accountId === grant.accountId) &&
+      (m.role === grant.role || (grant.role === "owner" && ["owner", "super_admin"].includes(String(m.role)))) &&
+      (m.schoolId || null) === (grant.schoolId || null) &&
+      (m.branchId || m.schoolBranchId || null) === (grant.branchId || null) &&
+      (m.teacherId || null) === (grant.teacherId || null)
+    );
+    if (!membership) return null;
+    const authorizedMembership: UserMembership = {
+      ...membership, id: grant.membershipId, accountId: grant.accountId,
+      role: grant.role, schoolId: grant.schoolId, branchId: grant.branchId,
+      schoolBranchId: grant.branchId, teacherId: grant.teacherId, active: true,
+    };
+    // Remove all alternate cached membership aliases. Offline role switching is
+    // impossible without another separately verified grant.
+    return {
+      ...user, role: grant.role,
+      memberships: [authorizedMembership],
+      userMemberships: [authorizedMembership],
+      accountMemberships: [authorizedMembership],
+      schoolMemberships: [authorizedMembership],
+      roleMemberships: [authorizedMembership],
+      membership: authorizedMembership,
+    };
+  } catch { return null; }
+}
 const STORED_USER_MEMBERSHIPS_KEY = "eleeveon_user_memberships";
 // This is a UX fallback, not cryptographic proof of offline authorization.
 // Bind cached identity to the previously verified account/user without a time-based offline cutoff.
@@ -368,7 +416,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     readStoredAccountInfo(),
     initialUser?.accountId || initialAccountId,
   );
-  const hasInitialCachedSession = cachedSessionEligible(initialUser, initialUser?.accountId || initialAccountId);
+  const hasInitialCachedSession = false; // Cached identity is never an authorization boundary.
 
   const [user, setUser] = useState<AccountUser | null>(hasInitialCachedSession ? initialUser : null);
   const [account, setAccount] = useState<AccountInfo | null>(initialAccount);
@@ -393,7 +441,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       const token = getAuthToken();
       const storedAccountId = getAccountId();
 
-      if (!token) {
+      if (!token && !(typeof navigator !== "undefined" && navigator.onLine === false)) {
         const storedAccount = readStoredAccountInfo();
 
         setUser(null);
@@ -408,8 +456,10 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       // An expired cached session must not be silently renewed offline.
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         const cached = readStoredUserWithFallback(storedAccountId);
-        if (cachedSessionEligible(cached, cached?.accountId || storedAccountId)) {
-          setUser(cached);
+        const authorized = await verifiedIndependentOfflineUser(cached, cached?.accountId || storedAccountId);
+        if (!isSessionGenerationCurrent(generation)) return;
+        if (authorized) {
+          setUser(authorized);
           setAccount(normalizeAccountInfo(readStoredAccountInfo(), cached?.accountId || storedAccountId));
           setSessionVerified(false);
           setOffline(true);
@@ -480,8 +530,10 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       if (networkFailure) {
         // Preserve only a recent, identity-bound cached session during outages.
         const cached = readStoredUserWithFallback(getAccountId());
-        if (cachedSessionEligible(cached, cached?.accountId || getAccountId())) {
-          setUser(cached);
+        const authorized = await verifiedIndependentOfflineUser(cached, cached?.accountId || getAccountId());
+        if (!isSessionGenerationCurrent(generation)) return;
+        if (authorized) {
+          setUser(authorized);
           setAccount(normalizeAccountInfo(readStoredAccountInfo(), cached?.accountId || getAccountId()));
         } else {
           setUser(null);
@@ -505,7 +557,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     const storedAccountId = getAccountId();
     const storedAccount = readStoredAccountInfo();
     const restoredUser = readStoredUserWithFallback(storedAccountId);
-    const hasCachedSession = cachedSessionEligible(restoredUser, restoredUser?.accountId || storedAccountId);
+    const hasCachedSession = false; // Wait for online verification or signed offline authorization.
 
     if (hasCachedSession) {
       setUser(restoredUser);
@@ -547,7 +599,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       verifying,
       sessionVerified,
       offline,
-      authenticated: !!user && cachedSessionEligible(user, user.accountId || fallbackAccountId),
+      authenticated: !!user && (sessionVerified || offline),
       refreshAccount,
       logout,
     }),
@@ -633,5 +685,17 @@ export function IndependentAccountProvider({ children, session, selectedMembersh
     logout: async () => { setValid(false); onLock(); },
   };
   if (!valid) return null;
+  return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;
+}
+
+/** Read-only Independent account projection from a signature-verified grant.
+ * The calling runtime MUST verify certificate and grant before mounting this provider.
+ */
+import type { VerifiedIndependentIdentity } from '../lib/auth/independentVerifiedIdentity';
+export function VerifiedIndependentAccountProvider({children,identity,onLogout}:{children:React.ReactNode;identity:VerifiedIndependentIdentity;onLogout:()=>void}) {
+  const membership=identity.membership;
+  const user:AccountUser={id:identity.userId,accountId:identity.accountId,email:identity.email,fullName:identity.fullName,role:membership.role,memberships:[membership]};
+  const account:AccountInfo={id:identity.accountId,name:'Independent School',status:'active'};
+  const value:AccountContextType={user,account,subscription:null,accountId:identity.accountId,loading:false,restoring:false,verifying:false,sessionVerified:false,offline:true,authenticated:true,refreshAccount:async()=>{},logout:async()=>onLogout()};
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;
 }

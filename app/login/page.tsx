@@ -375,6 +375,8 @@ export default function LoginPage() {
       if (!explicitCloud) {
         const installed = await readVerifiedBrowserLicense();
         if (installed && installed.claims.accountId === res.user.accountId) {
+          // Independent authorization is verified by the shared portal host.
+          // No cloud workspace bootstrap is permitted or required here.
           openPath(router, "/independent/workspace");
           return;
         }
@@ -552,10 +554,10 @@ export default function LoginPage() {
         );
       } catch (error: any) {
         const reason = String(error?.message || "Failed to prepare this workspace.");
-        if (false && /platform_only/i.test(reason)) {
+        if (/platform_only/i.test(reason)) {
           setBootstrapProgress(null);
           setPendingMembership(null);
-          openPath(router, "/independent/workspace");
+          setBootstrapError("Independent storage is enabled; cloud workspace bootstrap is not available. Verify or activate the Independent licence on this browser. Local records are preserved.");
           return;
         }
         setBootstrapError(reason);

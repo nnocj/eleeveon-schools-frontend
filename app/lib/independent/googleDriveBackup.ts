@@ -1,7 +1,8 @@
 "use client";
 import { encryptSchoolArchive } from "./archive";
-import { captureSchoolDatabase } from "./databaseSnapshot";
+import { captureAccountScopedSchoolBackup } from "./accountScopedSnapshot";
 import { inspectEncryptedBackup, validateSnapshot } from "./backupVerification";
+import { assertDriveSnapshotIsolation } from "./driveIsolation";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -41,8 +42,10 @@ export async function listDriveBackups(token:string,accountId:string):Promise<Dr
  return (result.files||[]).filter((f:DriveBackup)=>f.name.startsWith(`eleeveon-${accountTag(accountId)}-`)&&f.name.endsWith(".eleeveonbak"));
 }
 export async function uploadEncryptedDriveBackup(args:{token:string;databaseName:string;accountId:string;passphrase:string}) {
- const snapshot=await captureSchoolDatabase(args.databaseName,args.accountId);
+ const snapshot=await captureAccountScopedSchoolBackup(args.databaseName,args.accountId);
  const expected=validateSnapshot(snapshot,args.databaseName);
+ // No Google API upload is attempted unless the entire snapshot passes isolation.
+ assertDriveSnapshotIsolation(snapshot,args.accountId);
  const encrypted=JSON.stringify(await encryptSchoolArchive(snapshot,args.passphrase));
  const name=`eleeveon-${accountTag(args.accountId)}-${snapshot.createdAt.replace(/[:.]/g,"-")}-${crypto.randomUUID().slice(0,8)}.eleeveonbak`;
  const metadata={name,mimeType:"application/octet-stream",description:"Encrypted Eleeveon Schools Independent recovery snapshot"};

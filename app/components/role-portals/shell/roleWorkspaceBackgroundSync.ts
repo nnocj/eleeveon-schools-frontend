@@ -40,6 +40,7 @@ import {
 import {
   bootstrapSelectedWorkspace,
 } from "../../../lib/sync/workspaceBootstrap";
+import { readVerifiedBrowserLicense } from "../../../lib/independent/browserLicense";
 
 import {
   membershipKey,
@@ -180,6 +181,12 @@ export function prepareRoleWorkspaceInBackground(
       ) {
         return;
       }
+
+      // Independent school data is local/Drive-backed, never cloud-workspace downloaded.
+      // A VERIFIED licence is a deployment selector, NOT an authorization grant.
+      // The Independent host separately verifies the signed membership grant.
+      const independentLicense = await readVerifiedBrowserLicense();
+      if (independentLicense?.claims.accountId === accountId) return;
 
       await bootstrapSelectedWorkspace(
         membership,

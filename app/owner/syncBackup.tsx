@@ -24,6 +24,7 @@ import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { apiRequest } from "../lib/platformApi";
 import { db } from "../lib/db/db";
+import IndependentBackupPanel from "../components/independent/IndependentBackupPanel";
 
 type ViewMode = "cards" | "table" | "devices" | "conflicts" | "analytics";
 type SyncFilter = "all" | "pending" | "synced" | "deleted" | "conflicts" | "empty";
@@ -626,6 +627,10 @@ export default function SyncBackupGoldenCompactPage() {
           <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
         </section>
       )}
+
+      <section aria-label="School Google Drive backup" style={{marginBottom:16}}>
+        <IndependentBackupPanel databaseName={db.name} accountId={accountId} />
+      </section>
 
       <section className="ba-search-card" aria-label="Sync and backup actions">
         <label className="ba-search">

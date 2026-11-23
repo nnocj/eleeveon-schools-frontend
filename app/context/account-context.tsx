@@ -156,13 +156,13 @@ async function verifiedIndependentOfflineUser(user: AccountUser | null, accountI
     if (!membership) return null;
     const authorizedMembership: UserMembership = {
       ...membership, id: grant.membershipId, accountId: grant.accountId,
-      role: grant.role, schoolId: grant.schoolId, branchId: grant.branchId,
+      role: grant.role === "owner" ? "super_admin" : grant.role, schoolId: grant.schoolId, branchId: grant.branchId,
       schoolBranchId: grant.branchId, teacherId: grant.teacherId, active: true,
     };
     // Remove all alternate cached membership aliases. Offline role switching is
     // impossible without another separately verified grant.
     return {
-      ...user, role: grant.role,
+      ...user, role: authorizedMembership.role,
       memberships: [authorizedMembership],
       userMemberships: [authorizedMembership],
       accountMemberships: [authorizedMembership],

@@ -68,10 +68,10 @@ export async function readVerifiedBrowserLicense():Promise<{claims:OfflineLicens
  const selected=selectedLicenseId();
  const all=await listVerifiedBrowserLicenses();
  if(selected){const found=all.find(x=>x.selector===selected);if(!found)throw new Error('Selected licence is not installed or is not verified');return found;}
- // An unambiguous verified registry licence must work without a URL selector.
- // Do not silently choose among multiple installed licences/accounts.
+ // Prefer an explicitly selected certificate. Otherwise only auto-select when
+ // exactly one verified installation exists; never guess between accounts.
  if(all.length===1)return all[0];
- if(all.length>1)throw new Error('Multiple Independent licences are installed. Select a specific licence to open the correct school.');
+ if(all.length>1)throw new Error('Multiple Independent licences are installed. Select the intended licence using the license parameter.');
  return null;
 }
 export async function activateBrowserLicense(args:{licenseKey:string;licenseId:string;accountId:string}):Promise<OfflineLicenseClaims>{

@@ -24,7 +24,7 @@ import {
   type WorkspaceBootstrapProgress,
 } from "../lib/sync/workspaceBootstrap";
 import { useRouter } from "next/navigation";
-import { readVerifiedBrowserLicense } from "../lib/independent/browserLicense";
+import { readVerifiedBrowserLicense, independentWorkspaceUrl } from "../lib/independent/browserLicense";
 import { enrollOfflineGrantAfterLogin } from "../lib/auth/enrollOfflineGrantAfterLogin";
 
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
@@ -377,7 +377,7 @@ export default function LoginPage() {
         if (installed && installed.claims.accountId === res.user.accountId) {
           // Independent authorization is verified by the shared portal host.
           // No cloud workspace bootstrap is permitted or required here.
-          openPath(router, "/independent/workspace");
+          openPath(router, independentWorkspaceUrl());
           return;
         }
       }
@@ -453,45 +453,14 @@ export default function LoginPage() {
         return;
       }
 
-      // Single membership users receive the same priority workspace bootstrap
-      // as users who choose from Select Role.
+      // A role is authorized by its membership, not by downloading school data.
+      // Independent installations are routed above using a verified certificate.
+      // Cloud portal shells can load permitted records after entry; never block
+      // sign-in on /sync/workspace-bootstrap (platform_only rejects that route).
       if (memberships.length === 1) {
         const membership = memberships[0];
-
         setStoredActiveMembership(membership);
-        setPendingMembership(membership);
-        setBootstrapError(null);
-
-        try {
-          await bootstrapSelectedWorkspace(
-            membership,
-            {
-              allowCached: true,
-              onProgress:
-                setBootstrapProgress,
-            },
-          );
-
-          openPath(
-            router,
-            getPortalPathByRole(
-              membership.role,
-            ),
-          );
-        } catch (error: any) {
-          const reason = String(error?.message || "Failed to prepare this workspace.");
-          if (false && /platform_only/i.test(reason)) {
-            // Cloud credentials identify the account, but never authorize local school records.
-            // The Independent route performs license verification and local staff sign-in.
-            setBootstrapProgress(null);
-            setPendingMembership(null);
-            openPath(router, "/independent/workspace");
-            return;
-          }
-          setBootstrapError(reason);
-          setLoading(false);
-        }
-
+        openPath(router, getPortalPathByRole(membership.role));
         return;
       }
 

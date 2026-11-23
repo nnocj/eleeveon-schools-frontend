@@ -50,6 +50,7 @@ import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
 import { IS_INDEPENDENT_RUNTIME, isIndependentPwaRoute } from "../../../lib/independent/runtimeMode";
 import { useIndependentPortalIdentity } from "../../../lib/independent/independentPortalContext";
+import { readVerifiedBrowserLicense } from "../../../lib/independent/browserLicense";
 import {
   bootstrapPriorityWorkspaceTables,
   arePriorityWorkspaceTablesCached,
@@ -278,6 +279,20 @@ function RolePortalShellContent({
   const independentIdentity = useIndependentPortalIdentity();
   const independentWorkspace = Boolean(independentIdentity) ||
     IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute();
+  // A shared /branch-admin URL alone does not establish Independent identity.
+  // Detect a verified installation separately, and route to the signed host.
+  const [verifiedIndependentAccount, setVerifiedIndependentAccount] = useState<string | null>(null);
+  const [independentLicenseChecked, setIndependentLicenseChecked] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void readVerifiedBrowserLicense().then(license => {
+      if (active) setVerifiedIndependentAccount(license?.claims.accountId || null);
+    }).catch(error => {
+      console.warn('[Eleeveon] Independent certificate verification:', error);
+      if (active) setVerifiedIndependentAccount(null);
+    }).finally(() => { if (active) setIndependentLicenseChecked(true); });
+    return () => { active = false; };
+  }, []);
   const branchWorkspaceLayout = navigationMode === "branch-workspace";
   const router = useRouter();
 
@@ -1562,6 +1577,11 @@ function RolePortalShellContent({
   }, []);
 
   useEffect(() => {
+    if (!independentLicenseChecked) return;
+    if (verifiedIndependentAccount && verifiedIndependentAccount === accountId && !independentIdentity) {
+      router.replace('/independent/workspace');
+      return;
+    }
     if (!entryIdentity || !selectedMembership || !authenticated ||
         !(sessionVerified || (accountOffline && authenticated)) || !membershipRestored || !canAccess ||
         accountRestoring || accountLoading ||
@@ -1606,11 +1626,11 @@ function RolePortalShellContent({
           if (membership.accountId !== accountId) throw new Error('Independent account mismatch');
           if (membership.schoolId) {
             const school = await db.schools.get(membership.schoolId);
-            if (!school || school.accountId !== accountId) throw new Error('The selected Independent school was not found in this local database');
+            if (school && school.accountId !== accountId) throw new Error('The selected Independent school belongs to another account');
           }
           if (membership.branchId) {
             const branch = await db.branches.get(membership.branchId);
-            if (!branch || branch.accountId !== accountId || branch.schoolId !== membership.schoolId) {
+            if (branch && (branch.accountId !== accountId || branch.schoolId !== membership.schoolId)) {
               throw new Error('The selected Independent branch does not match the signed-in school');
             }
           }
@@ -1693,7 +1713,8 @@ function RolePortalShellContent({
   }, [entryIdentity, entryRetry, authenticated, sessionVerified,
       membershipRestored, canAccess, accountRestoring, accountLoading,
       databaseContext.ready, switchingMembershipId, startupDeadline, accountOffline, allMemberships,
-      independentWorkspace, independentIdentity?.session.id]);
+      independentWorkspace, independentIdentity?.session.id,
+      independentLicenseChecked, verifiedIndependentAccount, router]);
 
   const firstDownloadReady = Boolean(entryIdentity &&
     entryState.key === entryIdentity && entryState.state === "ready");
@@ -2138,6 +2159,12 @@ function RolePortalShellContent({
   // Never release a fresh/incognito workspace before its complete,
   // membership-scoped bootstrap has finished. On failure keep Retry visible;
   // do not open blank modules or silently use the wrong branding.
+  if (!independentLicenseChecked) {
+    return <CenterCard title="Checking installed workspace" text="Verifying this browser's Independent licence before selecting the correct portal." />;
+  }
+  if (verifiedIndependentAccount && verifiedIndependentAccount === accountId && !independentIdentity) {
+    return <CenterCard title="Opening Independent workspace" text="Checking signed local membership authorization." />;
+  }
   if (hasUsableWorkspace && entryIdentity && !firstDownloadReady) {
     return (
       <WorkspaceBootstrapScreen

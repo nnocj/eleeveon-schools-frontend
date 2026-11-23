@@ -41,6 +41,7 @@ import {
   bootstrapSelectedWorkspace,
 } from "../../../lib/sync/workspaceBootstrap";
 import { readVerifiedBrowserLicense } from "../../../lib/independent/browserLicense";
+import { IS_INDEPENDENT_RUNTIME, isIndependentPwaRoute } from "../../../lib/independent/runtimeMode";
 
 import {
   membershipKey,
@@ -115,6 +116,8 @@ function isConnected(): boolean {
 export function prepareRoleWorkspaceInBackground(
   membership: UserMembership,
 ): Promise<void> {
+  // Independent portal data is local-first; never schedule a Cloud download.
+  if (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) return Promise.resolve();
   const scope = appearanceScopeForRole(
     membership.role,
   );

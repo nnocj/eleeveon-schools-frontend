@@ -566,7 +566,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   }, [refreshAccount]);
 
   useEffect(() => {
-    const reconnect = () => { void refreshAccount({ background: true, reason: "reconnect" }); };
+    const reconnect = () => { void refreshAccount({ background: true, reason: "focus" }); };
     window.addEventListener("online", reconnect);
     return () => window.removeEventListener("online", reconnect);
   }, [refreshAccount]);

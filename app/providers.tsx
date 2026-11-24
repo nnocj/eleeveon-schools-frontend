@@ -5,7 +5,7 @@ import type {
 } from "react";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
-import { APP_DB_NAME } from "./lib/db/db-version";
+import { APP_DB_NAME, resolveNormalDatabaseName } from "./lib/db/db-version";
 
 import AppUpdateManager from "./components/AppUpdateManager";
 import DatabaseBootstrap from "./components/DatabaseBootstrap";
@@ -162,7 +162,7 @@ import IndependentRuntimeShell from './components/independent/IndependentRuntime
 export default function Providers({children}:{children: ReactNode}) {
   const pathname=usePathname();
   const independent=Boolean(pathname?.startsWith("/independent/workspace"));
-  const dbMismatch=APP_DB_NAME !== (independent ? (() => { const selector = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("license") : null; if(!selector)return "EleeveonIndependentDB";try{const old=localStorage.getItem('eleeveon_independent_browser_license_v1');if(old){const payload=JSON.parse(JSON.parse(old).envelope.payload);if(String(payload.licenseId||payload.id)===selector)return "EleeveonIndependentDB";}}catch{}return `EleeveonIndependentDB_${selector}`; })() : "EleeveonDB");
+  const dbMismatch=APP_DB_NAME !== (independent ? (() => { const selector = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("license") : null; if(!selector)return "EleeveonIndependentDB";try{const old=localStorage.getItem('eleeveon_independent_browser_license_v1');if(old){const payload=JSON.parse(JSON.parse(old).envelope.payload);if(String(payload.licenseId||payload.id)===selector)return "EleeveonIndependentDB";}}catch{}return `EleeveonIndependentDB_${selector}`; })() : resolveNormalDatabaseName());
   useEffect(()=>{if(dbMismatch)window.location.reload();},[dbMismatch]);
   if(dbMismatch)return <main className="p-6">Switching school workspace…</main>;
   if (independent) return <IndependentRuntimeShell>{children}</IndependentRuntimeShell>;

@@ -19,6 +19,7 @@ export async function syncHttp<T>(endpoint: string, options: SyncHttpOptions = {
   if (IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute()) throw new Error(`Cloud sync endpoint ${endpoint} is prohibited in Independent mode`);
   // Enforce account-scoped transport permissions even if a caller bypasses runSync.
   // /sync/policy itself is exempt so that the policy resolver can fetch it.
+  if (typeof navigator !== "undefined" && !navigator.onLine) throw new Error("Network synchronization is unavailable offline.");
   const route = endpoint.split("?")[0].replace(/\/+$/, "");
   // A workspace bootstrap contains school data. It is NEVER a platform-cache
   // request. Check the server-resolved entitlement before making the POST.
@@ -31,7 +32,7 @@ export async function syncHttp<T>(endpoint: string, options: SyncHttpOptions = {
     }
     const policy = await resolveSyncPolicy(accountId, { forceRefresh: true, online: true });
     if (!policy.allowWorkspaceBootstrap || policy.mode === "hybrid" || policy.mode === "offline") {
-      throw new Error("Cloud workspace bootstrap is unavailable for this account. Independent accounts must open through the verified Independent workspace. Local records remain unchanged.");
+      throw new Error("Cloud workspace bootstrap is unavailable for this account. Independent accounts use local school records. Local records remain unchanged.");
     }
   }
   if (route === "/sync/push" || route === "/sync/pull") {

@@ -18,13 +18,9 @@
 
 import React, { useEffect, useState } from "react";
 
-import WorkspaceBootstrapScreen from "../components/WorkspaceBootstrapScreen";
-import {
-  bootstrapSelectedWorkspace,
-  type WorkspaceBootstrapProgress,
-} from "../lib/sync/workspaceBootstrap";
 import { useRouter } from "next/navigation";
-import { readVerifiedBrowserLicense, independentWorkspaceUrl } from "../lib/independent/browserLicense";
+import { resolveSyncPolicy } from "../lib/sync/resolveSyncPolicy";
+import { clearCachedSyncPolicy } from "../lib/sync/syncPolicyCache";
 import { enrollOfflineGrantAfterLogin } from "../lib/auth/enrollOfflineGrantAfterLogin";
 
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
@@ -301,18 +297,21 @@ function openPath(router: ReturnType<typeof useRouter>, path: string) {
 // PAGE
 // ======================================================
 
+import { useAccount } from "../context/account-context";
+
 export default function LoginPage() {
   const router = useRouter();
+  const restoredAccount = useAccount();
+  useEffect(() => {
+    if (!restoredAccount.authenticated || !restoredAccount.offline || !restoredAccount.user) return;
+    const role = restoredAccount.user.role;
+    if (role === "super_admin" || role === "branch_admin" || role === "teacher") {
+      router.replace(getPortalPathByRole(role));
+    }
+  }, [restoredAccount.authenticated, restoredAccount.offline, restoredAccount.user, router]);
   const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [bootstrapProgress, setBootstrapProgress] =
-    useState<WorkspaceBootstrapProgress | null>(null);
-  const [bootstrapError, setBootstrapError] =
-    useState<string | null>(null);
-  const [pendingMembership, setPendingMembership] =
-    useState<UserMembership | null>(null);
-
   const update = (patch: Partial<typeof form>) => {
     setForm((prev) => ({ ...prev, ...patch }));
   };
@@ -368,17 +367,13 @@ export default function LoginPage() {
       } catch (offlineError) {
         console.warn("Offline access enrollment failed; online login is still available", offlineError);
       }
-      // Authenticate centrally before resolving the installation's storage policy.
-      // A verified Independent license only selects the runtime; it never grants
-      // access without centrally issued identity and separately verified scope.
-      const explicitCloud = new URLSearchParams(window.location.search).get("cloud") === "1";
-      if (!explicitCloud) {
-        const installed = await readVerifiedBrowserLicense();
-        if (installed && installed.claims.accountId === res.user.accountId) {
-          // Independent authorization is verified by the shared portal host.
-          // No cloud workspace bootstrap is permitted or required here.
-          openPath(router, independentWorkspaceUrl());
-          return;
+      clearCachedSyncPolicy(res.user.accountId);
+      if (role !== "developer" && role !== "platform_team") {
+        const policy = await resolveSyncPolicy(res.user.accountId, { forceRefresh: true });
+        if (policy.mode === "hybrid" || policy.mode === "offline") {
+          localStorage.setItem("eleeveon_local_workspace_account", res.user.accountId);
+        } else {
+          localStorage.removeItem("eleeveon_local_workspace_account");
         }
       }
 
@@ -498,58 +493,9 @@ export default function LoginPage() {
     if (event.key === "Enter" && !loading) submit();
   };
 
-  const retryWorkspaceBootstrap =
-    async () => {
-      if (!pendingMembership) return;
-
-      setBootstrapError(null);
-
-      try {
-        await bootstrapSelectedWorkspace(
-          pendingMembership,
-          {
-            force: true,
-            allowCached: true,
-            onProgress:
-              setBootstrapProgress,
-          },
-        );
-
-        openPath(
-          router,
-          getPortalPathByRole(
-            pendingMembership.role,
-          ),
-        );
-      } catch (error: any) {
-        const reason = String(error?.message || "Failed to prepare this workspace.");
-        if (/platform_only/i.test(reason)) {
-          setBootstrapProgress(null);
-          setPendingMembership(null);
-          setBootstrapError("Independent storage is enabled; cloud workspace bootstrap is not available. Verify or activate the Independent licence on this browser. Local records are preserved.");
-          return;
-        }
-        setBootstrapError(reason);
-      }
-    };
-
   return (
     <main className="login-page">
       <style>{css}</style>
-
-      {(bootstrapProgress || bootstrapError) && (
-        <WorkspaceBootstrapScreen
-          progress={bootstrapProgress}
-          error={bootstrapError}
-          onRetry={retryWorkspaceBootstrap}
-          onCancel={() => {
-            setBootstrapProgress(null);
-            setBootstrapError(null);
-            setPendingMembership(null);
-            openPath(router, "/select-role");
-          }}
-        />
-      )}
 
       <section className="login-card">
         <div className="login-badge">🔐</div>

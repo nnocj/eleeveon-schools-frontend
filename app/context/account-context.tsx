@@ -42,6 +42,7 @@ import {
 import { clearStoredActiveMembership } from "../lib/auth/activeMembership";
 import { performAtomicLogout, subscribeToAtomicLogout } from "../lib/auth/logout";
 import { getSessionGeneration, isSessionGenerationCurrent } from "../lib/auth/sessionGeneration";
+import { trustedOfflineGrantKeys } from "../lib/auth/trustedOfflineGrantKeys";
 import { restoreIndependentStartupAuthorization } from "../lib/auth/restoreIndependentStartupAuthorization";
 import { AccountSubscriptionDTO } from "../lib/billing/subscriptionAccess";
 import {
@@ -126,18 +127,10 @@ type AccountContextType = {
 const AccountContext = createContext<AccountContextType | undefined>(undefined);
 
 /** Trusted signing keys must be bundled at build time, never fetched from the grant itself. */
-function pinnedOfflineSigningKeys(): Readonly<Record<string, JsonWebKey>> {
-  try {
-    const parsed: unknown = JSON.parse(process.env.NEXT_PUBLIC_ELEEVEON_OFFLINE_GRANT_KEYS || "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, JsonWebKey> : {};
-  } catch { return {}; }
-}
-
 /** Return ONLY the identity and membership authorized by a verified signed grant. */
 async function verifiedIndependentOfflineUser(user: AccountUser | null, accountId: string | null): Promise<AccountUser | null> {
   if (!user?.id || !accountId || user.accountId !== accountId) return null;
-  const keys = pinnedOfflineSigningKeys();
+  const keys = await trustedOfflineGrantKeys();
   if (!Object.keys(keys).length) return null;
   try {
     const grant = await restoreIndependentStartupAuthorization({
@@ -570,6 +563,12 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       background: hasCachedSession,
       reason: "startup",
     });
+  }, [refreshAccount]);
+
+  useEffect(() => {
+    const reconnect = () => { void refreshAccount({ background: true, reason: "reconnect" }); };
+    window.addEventListener("online", reconnect);
+    return () => window.removeEventListener("online", reconnect);
   }, [refreshAccount]);
 
   const clearAccountReactState = useCallback(() => {

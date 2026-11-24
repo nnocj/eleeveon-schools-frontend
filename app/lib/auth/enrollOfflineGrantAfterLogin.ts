@@ -1,5 +1,5 @@
 import { apiRequest } from '../platformApi';
-import { readVerifiedBrowserLicense } from '../independent/browserLicense';
+import { listVerifiedBrowserLicenses, provisionBrowserLicense } from '../independent/browserLicense';
 import { saveVerifiedOfflineGrant } from './offlineGrantStore';
 
 /** Convert a deployment-pinned SPKI RSA public key to a verification-only JWK. */
@@ -19,7 +19,8 @@ export async function enrollOfflineGrantAfterLogin(input: {
   accountId: string;
   memberships: ReadonlyArray<{ id?: string; role?: string; active?: boolean }>;
 }): Promise<'not-independent' | 'enrolled' | 'no-eligible-membership'> {
-  const license = await readVerifiedBrowserLicense();
+  let license = (await listVerifiedBrowserLicenses()).find(x=>x.claims.accountId===input.accountId) ?? null;
+  if (!license && input.memberships.some(m=>m.active!==false && m.role==='super_admin')) license=await provisionBrowserLicense(input.accountId);
   if (!license || license.claims.accountId !== input.accountId) return 'not-independent';
   const membership = input.memberships.find(m => m.active !== false &&
     typeof m.id === 'string' && m.id.length > 0 &&

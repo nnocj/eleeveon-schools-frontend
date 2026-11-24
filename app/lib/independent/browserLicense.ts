@@ -96,3 +96,21 @@ export async function activateBrowserLicense(args:{licenseKey:string;licenseId:s
   }
   return claims;
 }
+
+/** Provision from the authenticated account, without exposing a raw license key. */
+export async function provisionBrowserLicense(accountId:string):Promise<VerifiedBrowserLicense|null> {
+ const installationId=browserInstallationId();
+ const response=await apiRequest<{kind:'not-independent'}|{kind:'independent';accountId:string;envelope:OfflineLicenseEnvelope}>('/licenses/provision-browser',{method:'POST',body:JSON.stringify({installationId})});
+ if(response.kind==='not-independent')return null;
+ if(response.kind!=='independent'||response.accountId!==accountId)throw Error('Provisioned account mismatch');
+ const record:BrowserLicenseRecord={accountId,installationId,envelope:response.envelope};
+ const edition=JSON.parse(record.envelope.payload)?.edition;
+ if(edition!=='independent_essentials'&&edition!=='independent_multi_device')throw Error('Invalid Independent edition');
+ const claims=await verifyOfflineLicense({envelope:record.envelope,publicKeys:pinnedKeys(),expectedAccountId:accountId,expectedInstallationId:installationId,expectedEdition:edition,appMajorVersion:1});
+ const selector=licenseSelector(record);
+ const existing=registry();
+ const legacy=localStorage.getItem(KEY);
+ if(legacy && licenseSelector(JSON.parse(legacy))===selector) localStorage.setItem(KEY,JSON.stringify(record));
+ else localStorage.setItem(REGISTRY_KEY,JSON.stringify([...existing.filter(x=>licenseSelector(x)!==selector),record]));
+ return {claims,record,selector};
+}

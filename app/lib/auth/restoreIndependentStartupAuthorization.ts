@@ -1,4 +1,4 @@
-import { readVerifiedBrowserLicense } from '../independent/browserLicense';
+import { listVerifiedBrowserLicenses } from '../independent/browserLicense';
 import { restoreOfflineAtStartup } from './restoreOfflineAtStartup';
 import type { OfflineGrant } from './verifyOfflineGrant';
 
@@ -13,7 +13,8 @@ export async function restoreIndependentStartupAuthorization(input: {
   trustedSigningKeys: Readonly<Record<string, JsonWebKey>>;
 }): Promise<OfflineGrant | null> {
   if (!input.expectedUserId?.trim() || !input.expectedAccountId?.trim()) return null;
-  const license = await readVerifiedBrowserLicense();
+  const matches = (await listVerifiedBrowserLicenses()).filter(item => item.claims.accountId === input.expectedAccountId);
+  const license = matches.length === 1 ? matches[0] : null;
   if (!license || license.claims.accountId !== input.expectedAccountId) return null;
   const licenseId = String(license.claims.licenseId || '');
   const installationId = String(license.record.installationId || '');

@@ -50,7 +50,8 @@ import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
 import { IS_INDEPENDENT_RUNTIME, isIndependentPwaRoute } from "../../../lib/independent/runtimeMode";
 import { useIndependentPortalIdentity } from "../../../lib/independent/independentPortalContext";
-import { readVerifiedBrowserLicense } from "../../../lib/independent/browserLicense";
+import { resolveSyncPolicy } from "../../../lib/sync/resolveSyncPolicy";
+import type { EffectiveSyncPolicy } from "../../../lib/sync/syncPolicy";
 import {
   bootstrapPriorityWorkspaceTables,
   arePriorityWorkspaceTablesCached,
@@ -277,22 +278,6 @@ function RolePortalShellContent({
   // The Independent host mounts the original /owner and /branch-admin pages.
   // Those URLs are not Independent routes, so use explicit host context.
   const independentIdentity = useIndependentPortalIdentity();
-  const independentWorkspace = Boolean(independentIdentity) ||
-    IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute();
-  // A shared /branch-admin URL alone does not establish Independent identity.
-  // Detect a verified installation separately, and route to the signed host.
-  const [verifiedIndependentAccount, setVerifiedIndependentAccount] = useState<string | null>(null);
-  const [independentLicenseChecked, setIndependentLicenseChecked] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void readVerifiedBrowserLicense().then(license => {
-      if (active) setVerifiedIndependentAccount(license?.claims.accountId || null);
-    }).catch(error => {
-      console.warn('[Eleeveon] Independent certificate verification:', error);
-      if (active) setVerifiedIndependentAccount(null);
-    }).finally(() => { if (active) setIndependentLicenseChecked(true); });
-    return () => { active = false; };
-  }, []);
   const branchWorkspaceLayout = navigationMode === "branch-workspace";
   const router = useRouter();
 
@@ -342,6 +327,17 @@ function RolePortalShellContent({
     authenticated,
     offline: accountOffline,
   } = accountContext;
+
+  const [startupPolicy, setStartupPolicy] = useState<EffectiveSyncPolicy | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (accountId && authenticated) void resolveSyncPolicy(accountId, { forceRefresh: true }).then(policy => { if (active) setStartupPolicy(policy); });
+    return () => { active = false; };
+  }, [accountId, authenticated, sessionVerified]);
+  const policyReady = startupPolicy?.accountId === accountId;
+  const verifiedOfflineLocal = Boolean(accountOffline && authenticated && !sessionVerified);
+  const localPolicy = policyReady && (startupPolicy?.mode === "hybrid" || startupPolicy?.mode === "offline") && startupPolicy.allowLocalMutations;
+  const independentWorkspace = Boolean(independentIdentity) || IS_INDEPENDENT_RUNTIME || isIndependentPwaRoute() || Boolean(localPolicy) || verifiedOfflineLocal;
 
   const {
     activeMembership,
@@ -803,7 +799,7 @@ function RolePortalShellContent({
       return;
     }
 
-    if (independentWorkspace) return;
+    if (independentIdentity) return;
 
     if (
       sessionVerified &&
@@ -961,7 +957,7 @@ function RolePortalShellContent({
    */
   useEffect(() => {
     if (
-      independentWorkspace ||
+      !policyReady || independentWorkspace ||
       !authenticated ||
       !sessionVerified ||
       !accountId ||
@@ -1095,7 +1091,7 @@ function RolePortalShellContent({
       !accountId ||
       !membershipRestored ||
       !canAccess ||
-      independentWorkspace ||
+      !policyReady || independentWorkspace ||
       !appearanceMatchesRole ||
       !databaseContext.ready ||
       !isOnline ||
@@ -1180,12 +1176,12 @@ function RolePortalShellContent({
   // authorized workspace. Background role sync may continue independently.
 
   const retryCurrentModule = useCallback(() => {
-    if (independentWorkspace || !navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
+    if (!policyReady || independentWorkspace || !navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
     // Retry the same module without refreshing the document or other modules.
     priorityAttemptedAt.current.clear();
     setPriorityError(null);
     setPriorityRetry(value => value + 1);
-  }, [selectedMembership, activeModuleTables, teacherWorkspace, priorityWorkspaceKey]);
+  }, [selectedMembership, activeModuleTables, teacherWorkspace, priorityWorkspaceKey, policyReady, independentWorkspace]);
 
   const [hubUnreadCount, setHubUnreadCount] = useState(0);
   const [hubHasAttention, setHubHasAttention] = useState(false);
@@ -1577,11 +1573,7 @@ function RolePortalShellContent({
   }, []);
 
   useEffect(() => {
-    if (!independentLicenseChecked) return;
-    if (verifiedIndependentAccount && verifiedIndependentAccount === accountId && !independentIdentity) {
-      router.replace('/independent/workspace');
-      return;
-    }
+    if (!policyReady && !independentIdentity && !verifiedOfflineLocal) return;
     if (!entryIdentity || !selectedMembership || !authenticated ||
         !(sessionVerified || (accountOffline && authenticated)) || !membershipRestored || !canAccess ||
         accountRestoring || accountLoading ||
@@ -1600,13 +1592,13 @@ function RolePortalShellContent({
           // The build-time Independent runtime may also reach this branch;
           // it must have a verified host identity to open a portal.
           const identity = independentIdentity;
-          if (!identity || identity.verified.accountId !== accountId ||
-              identity.license.accountId !== accountId) {
+          if (identity && (identity.verified.accountId !== accountId ||
+              identity.license.accountId !== accountId)) {
             throw new Error("A verified Independent license and signed membership are required.");
           }
-          const authorizedMembership = identity.verified.membership;
-          if (String(authorizedMembership.accountId) !== String(accountId) ||
-              membershipKey(authorizedMembership) !== membershipKey(membership)) {
+          const authorizedMembership = identity?.verified.membership;
+          if (identity ? (!authorizedMembership || String(authorizedMembership.accountId) !== String(accountId) ||
+              membershipKey(authorizedMembership) !== membershipKey(membership)) : (!(verifiedOfflineLocal || (localPolicy && sessionVerified && !accountOffline && navigator.onLine)) || !allMemberships.some(candidate => sameMembership(candidate, membership) && candidate.accountId === accountId))) {
             throw new Error("The selected Independent membership does not match the signed authorization.");
           }
           // The existing portals use Dexie. Never fetch Cloud bootstrap tables
@@ -1702,7 +1694,7 @@ function RolePortalShellContent({
       membershipRestored, canAccess, accountRestoring, accountLoading,
       databaseContext.ready, switchingMembershipId, startupDeadline, accountOffline, allMemberships,
       independentWorkspace, independentIdentity?.verified.grant.userId,
-      independentLicenseChecked, verifiedIndependentAccount, router]);
+      policyReady, localPolicy, verifiedOfflineLocal, router]);
 
   const firstDownloadReady = Boolean(entryIdentity &&
     entryState.key === entryIdentity && entryState.state === "ready");
@@ -2147,12 +2139,6 @@ function RolePortalShellContent({
   // Never release a fresh/incognito workspace before its complete,
   // membership-scoped bootstrap has finished. On failure keep Retry visible;
   // do not open blank modules or silently use the wrong branding.
-  if (!independentLicenseChecked) {
-    return <CenterCard title="Checking installed workspace" text="Verifying this browser's Independent licence before selecting the correct portal." />;
-  }
-  if (verifiedIndependentAccount && verifiedIndependentAccount === accountId && !independentIdentity) {
-    return <CenterCard title="Opening Independent workspace" text="Checking signed local membership authorization." />;
-  }
   if (hasUsableWorkspace && entryIdentity && !firstDownloadReady) {
     return (
       <WorkspaceBootstrapScreen

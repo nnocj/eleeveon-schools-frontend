@@ -20,7 +20,7 @@ export const LOGOUT_EVENT_NAME = "eleeveon:atomic-logout";
 let activeLogoutPromise: Promise<void> | null = null;
 
 const AUTH_SESSION_KEYS = [
-  "eleeveon_offline_session_meta_v1", "eleeveon_auth_token", "eleeveon_access_token", "accessToken", "token", "authToken",
+  "eleeveon_local_workspace_account", "eleeveon_offline_session_meta_v1", "eleeveon_auth_token", "eleeveon_access_token", "accessToken", "token", "authToken",
   "eleeveon_auth_user", "eleeveon_auth_account", "eleeveon_account_user",
   "eleeveon_account_info", "eleeveon_user_memberships", "eleeveon_open_workspace",
   "activeMembership", "activeMembershipId", "activeRole", "activeSchoolId",

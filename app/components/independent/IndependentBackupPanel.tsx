@@ -1,8 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { previewAccountScopedDriveRestore, type ScopedRestorePreview } from "../../lib/independent/scopedRestorePreview";
 import { restoreAccountScopedIntoEmptyStores } from "../../lib/independent/scopedTransactionalRestore";
-import { authorizeDrive, listDriveBackups, uploadEncryptedDriveBackup, downloadDriveBackup, type DriveBackup } from "../../lib/independent/googleDriveBackup";
+import { authorizeDrive, driveStatus, disconnectDrive, validateDrive, listDriveBackups, uploadEncryptedDriveBackup, downloadDriveBackup, type DriveBackup } from "../../lib/independent/googleDriveBackup";
 import { backupIndependentToFolder, chooseBackupFolder, inspectBackupFile, downloadIndependentEncryptedBackup } from "../../lib/independent/folderBackup";
 
 /** Owner-only; parent must verify the installed license and local Owner session. */
@@ -13,11 +13,13 @@ export default function IndependentBackupPanel({ databaseName, accountId, reauth
   reauthenticateOwner?: () => Promise<boolean>;
 }) {
   const [password, setPassword] = useState("");
-  const [driveToken,setDriveToken]=useState<string|null>(null);
+  const [driveConnected,setDriveConnected]=useState(false);
   const [driveFiles,setDriveFiles]=useState<DriveBackup[]>([]);
-  async function connectDrive(){setError("");try{const token=await authorizeDrive();setDriveToken(token);setDriveFiles(await listDriveBackups(token,accountId));setMessage("Google Drive connected for this session. Access tokens are not persisted.");}catch(e){setError(e instanceof Error?e.message:"Drive connection failed");}}
-  async function uploadDrive(){if(!driveToken||busy)return;setError("");setMessage("");if(password.length<12){setError("Use a backup passphrase of at least 12 characters.");return;}setBusy(true);try{const result=await uploadEncryptedDriveBackup({token:driveToken,databaseName,accountId,passphrase:password});setMessage(`Google Drive backup uploaded, downloaded and verified: ${result.name} (${result.records} records).`);setDriveFiles(await listDriveBackups(driveToken,accountId));setPassword("");}catch(e){setError(e instanceof Error?e.message:"Google Drive backup failed");}finally{setBusy(false);}}
-  async function retrieveDrive(id:string,name:string){if(!driveToken||busy)return;setError("");setBusy(true);try{const content=await downloadDriveBackup(driveToken,id);const blob=new Blob([content],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);setMessage("Encrypted backup downloaded. Use the separate Restore panel to inspect and restore it safely.");}catch(e){setError(e instanceof Error?e.message:"Download failed");}finally{setBusy(false);}}
+  useEffect(()=>{let cancelled=false;setDriveConnected(false);setDriveFiles([]);if(!navigator.onLine)return;void (async()=>{try{const status=await driveStatus();if(cancelled)return;setDriveConnected(status.connected);if(status.connected){await validateDrive();const files=await listDriveBackups();if(!cancelled)setDriveFiles(files);}}catch(e){if(!cancelled)setError(e instanceof Error?e.message:"Drive status unavailable");}})();return()=>{cancelled=true;};},[accountId]);
+  async function connectDrive(){setError("");setBusy(true);try{const result=await authorizeDrive();const url=new URL(result.authorizationUrl);if(url.origin!=="https://accounts.google.com")throw new Error("Invalid authorization destination");window.location.assign(url.href);}catch(e){setError(e instanceof Error?e.message:"Drive connection failed");setBusy(false);}}
+  async function disconnect(){if(!window.confirm("Disconnect Google Drive for this school account? Existing backups will remain in Drive."))return;setBusy(true);try{await disconnectDrive();setDriveConnected(false);setDriveFiles([]);setMessage("Google Drive disconnected.");}catch(e){setError(e instanceof Error?e.message:"Disconnect failed");}finally{setBusy(false);}}
+  async function uploadDrive(){if(!driveConnected||busy)return;setError("");setMessage("");if(password.length<12){setError("Use a backup passphrase of at least 12 characters.");return;}setBusy(true);try{const result=await uploadEncryptedDriveBackup({databaseName,accountId,passphrase:password});setMessage(`Google Drive backup uploaded, downloaded and verified: ${result.name} (${result.records} records).`);setDriveFiles(await listDriveBackups());setPassword("");}catch(e){setError(e instanceof Error?e.message:"Google Drive backup failed");}finally{setBusy(false);}}
+  async function retrieveDrive(id:string,name:string){if(!driveConnected||busy)return;setError("");setBusy(true);try{const content=await downloadDriveBackup(id);const blob=new Blob([content],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);setMessage("Encrypted backup downloaded. Use the separate Restore panel to inspect and restore it safely.");}catch(e){setError(e instanceof Error?e.message:"Download failed");}finally{setBusy(false);}}
 
   const [restoreFile, setRestoreFile] = useState<string | null>(null);
   const [restoreName, setRestoreName] = useState("");
@@ -99,10 +101,10 @@ export default function IndependentBackupPanel({ databaseName, accountId, reauth
     <p className="mt-2 text-xs">Folder selection requires a compatible browser. The download option works without a filesystem folder picker.</p>
     <div className="mt-5 rounded-xl border p-3 space-y-3">
       <h3 className="font-semibold">Direct Google Drive backup</h3>
-      <p className="text-xs">Uses your Google account without Google Drive desktop. Drive access is limited to files this app creates or opens. Backup passphrase is never uploaded.</p>
-      <div className="flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={()=>void connectDrive()} className="rounded-lg border px-3 py-2">{driveToken?"Reconnect Google Drive":"Connect Google Drive"}</button>
-      <button type="button" disabled={!driveToken||busy} onClick={()=>void uploadDrive()} className="rounded-lg border px-3 py-2 disabled:opacity-50">Upload and verify encrypted backup</button>
-      {driveToken&&<button type="button" onClick={()=>{setDriveToken(null);setDriveFiles([]);}} className="rounded-lg border px-3 py-2">Disconnect this session</button>}</div>
+      <p className="text-xs">Uses your Google account without Google Drive desktop. Drive access is limited to files this app creates or opens. Connection is saved for this school account. Backup passphrase is never uploaded. Current gateway limit: 1.5 MB per encrypted backup.</p>
+      <div className="flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={()=>void connectDrive()} className="rounded-lg border px-3 py-2">{driveConnected?"Reconnect Google Drive":"Connect Google Drive"}</button>
+      <button type="button" disabled={!driveConnected||busy} onClick={()=>void uploadDrive()} className="rounded-lg border px-3 py-2 disabled:opacity-50">Upload and verify encrypted backup</button>
+      {driveConnected&&<button type="button" disabled={busy} onClick={()=>void disconnect()} className="rounded-lg border px-3 py-2">Disconnect school account</button>}</div>
       {driveFiles.length>0&&<div className="space-y-2"><p className="text-sm font-medium">Recent backups</p>{driveFiles.map(f=><div key={f.id} className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{f.name}</span><button type="button" disabled={busy} className="rounded border px-2 py-1" onClick={()=>void retrieveDrive(f.id,f.name)}>Download for restore</button></div>)}</div>}
     </div>
     <label className="mt-5 block text-sm font-medium" htmlFor="independent-backup-inspect">Verify an existing backup without restoring it</label>
